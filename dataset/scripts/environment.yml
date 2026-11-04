@@ -1,0 +1,29 @@
+name: personality2occupation
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.11
+  - pip
+  - pandas
+  - pyarrow
+  - numpy
+  - scipy
+  - scikit-learn
+  - diptest>=0.8.0
+  - pyahocorasick
+  - zstandard
+  - tqdm
+  - rich
+  - pytest
+  - requests
+  - pyyaml
+  - pip:
+      - --extra-index-url https://download.pytorch.org/whl/cu121
+      - torch==2.5.1+cu121
+      - torchvision==0.20.1+cu121
+      - transformers>=4.40.0,<5.0.0
+      - datasets>=2.19.0,<3.0.0
+      - sentence-transformers>=3.0.0,<4.0.0
+      - accelerate>=0.28.0
+      - ollama>=0.2.0
