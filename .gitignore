@@ -20,6 +20,6 @@ htmlcov/
 
 # Dataset files, cache & raw downloads
 dataset/raw/
+dataset/cache/
 *.parquet
-dataset/lexicon_cache.json
 *lexicon*.json

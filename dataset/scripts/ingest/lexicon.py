@@ -464,7 +464,7 @@ def build_or_load_lexicon(
 ) -> OccupationLexicon:
     """Build the full occupation lexicon with subsumption pruning or load from disk cache."""
     if cache_path is None:
-        cache_path = Path(__file__).resolve().parents[2] / "lexicon_cache.json"
+        cache_path = Path(__file__).resolve().parents[2] / "cache" / "lexicon.json"
     else:
         cache_path = Path(cache_path)
 
