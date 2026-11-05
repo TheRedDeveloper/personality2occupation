@@ -1,6 +1,7 @@
 """
 Download helper for the Blog Authorship Corpus from Hugging Face.
-Ensures local caching without re-downloading if already present.
+Uses `paoramen/blog-authorship-corpus` which contains unique author IDs ('id')
+for grouping all posts by unique author.
 """
 
 from pathlib import Path
@@ -8,11 +9,11 @@ from typing import Optional
 import datasets
 
 
-DATASET_NAME = "barilan/blog_authorship_corpus"
+DATASET_NAME = "paoramen/blog-authorship-corpus"
 
 
 def download_blogger(cache_dir: Optional[Path] = None, split: str = "train") -> datasets.Dataset:
-    """Loads the Blog Authorship Corpus from Hugging Face.
+    """Loads the complete Blog Authorship Corpus with author IDs.
 
     The Hugging Face datasets library caches files automatically in ~/.cache/huggingface/datasets
     or the specified cache_dir.
@@ -21,7 +22,6 @@ def download_blogger(cache_dir: Optional[Path] = None, split: str = "train") -> 
     ds = datasets.load_dataset(
         DATASET_NAME,
         split=split,
-        trust_remote_code=True,
         cache_dir=str(cache_dir) if cache_dir else None,
     )
     print(f"[download_blogger] Loaded {len(ds):,} rows.")
