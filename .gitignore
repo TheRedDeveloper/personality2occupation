@@ -4,14 +4,9 @@ __pycache__/
 *$py.class
 *.so
 
-# Environments
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
+# IDE files
+.vscode/
+.idea/
 
 # Testing & coverage
 .pytest_cache/
