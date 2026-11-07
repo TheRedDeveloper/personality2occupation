@@ -25,7 +25,7 @@ DEFAULT_STAGE_A_STATE = Path("dataset/cache/stage_a_state.json")
 HF_BASE_URL = "https://huggingface.co/datasets/anhchanghoangsg/reddit_pushshift_dataset_cleaned/resolve/main"
 
 
-class FastRedditScreeningStage:
+class RedditScreeningStage:
     """Stage A: High-speed vectorized screening across top subreddits."""
 
     def __init__(
@@ -211,7 +211,7 @@ if __name__ == "__main__":
     parser.add_argument("--reset", action="store_true", help="Reset state and restart from sub #1")
     args = parser.parse_args()
 
-    stage_a = FastRedditScreeningStage()
+    stage_a = RedditScreeningStage()
     if args.reset:
         stage_a.completed_subreddits.clear()
         stage_a.seen_authors.clear()

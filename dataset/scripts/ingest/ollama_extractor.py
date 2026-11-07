@@ -126,7 +126,12 @@ class OllamaOccupationExtractor:
         """Find requested model or fallback to available model in Ollama."""
         try:
             res = self.client.list()
-            available = [m.model for m in res.models]
+            models_list = getattr(res, "models", []) or []
+            available: list[str] = [
+                str(m.model)
+                for m in models_list
+                if getattr(m, "model", None) is not None
+            ]
             # Exact match
             if requested_model in available:
                 return requested_model

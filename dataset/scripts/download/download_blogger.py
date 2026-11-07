@@ -5,7 +5,7 @@ for grouping all posts by unique author.
 """
 
 from pathlib import Path
-from typing import Optional
+from typing import Optional, cast
 import datasets
 
 
@@ -19,10 +19,13 @@ def download_blogger(cache_dir: Optional[Path] = None, split: str = "train") -> 
     or the specified cache_dir.
     """
     print(f"[download_blogger] Loading '{DATASET_NAME}' (split={split})...")
-    ds = datasets.load_dataset(
-        DATASET_NAME,
-        split=split,
-        cache_dir=str(cache_dir) if cache_dir else None,
+    ds = cast(
+        datasets.Dataset,
+        datasets.load_dataset(
+            DATASET_NAME,
+            split=split,
+            cache_dir=str(cache_dir) if cache_dir else None,
+        ),
     )
     print(f"[download_blogger] Loaded {len(ds):,} rows.")
     return ds

@@ -12,7 +12,7 @@ import argparse
 import json
 from pathlib import Path
 import time
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, cast
 from tqdm import tqdm
 
 from dataset.scripts.download.download_blogger import download_blogger
@@ -61,7 +61,8 @@ class BloggerIngestPipeline:
         ds = download_blogger()
         author_posts = defaultdict(list)
         print(f"[Blogger Step 1] Grouping {len(ds):,} posts by author ID...")
-        for row in ds:
+        for raw_row in ds:
+            row = cast(Dict[str, Any], raw_row)
             uid = str(row["id"])
             t = (row.get("text") or "").strip()
             if t:
@@ -235,7 +236,8 @@ class BloggerIngestPipeline:
         if missing_uids:
             print(f"[Blogger Step 3] Fetching corpus posts for {len(missing_uids):,} new verified authors...")
             ds = download_blogger()
-            for row in ds:
+            for raw_row in ds:
+                row = cast(Dict[str, Any], raw_row)
                 uid = str(row["id"])
                 if uid in missing_uids:
                     t = (row.get("text") or "").strip()
