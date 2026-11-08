@@ -4,7 +4,7 @@ __pycache__/
 *$py.class
 *.so
 
-# IDE files
+# IDEs
 .vscode/
 .idea/
 
@@ -13,8 +13,20 @@ __pycache__/
 .coverage
 htmlcov/
 
-# Dataset files, cache & raw downloads
+# Dataset files & cache
 dataset/raw/
 dataset/cache/
-*.parquet
-*lexicon*.json
+dataset/*.parquet
+
+# Website (Node / SvelteKit / Vite)
+node_modules/
+.svelte-kit/
+build/
+dist/
+.vite/
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
