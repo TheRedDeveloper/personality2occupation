@@ -2,10 +2,6 @@ import adapter from '@sveltejs/adapter-static';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 
-const base = (
-  process.argv.includes('dev') ? '' : (process.env.BASE_PATH ?? '/personality2occupation')
-) as '' | `/${string}`;
-
 export default defineConfig({
   plugins: [
     sveltekit({
@@ -17,7 +13,7 @@ export default defineConfig({
         strict: true
       }),
       paths: {
-        base
+        relative: true
       }
     })
   ]

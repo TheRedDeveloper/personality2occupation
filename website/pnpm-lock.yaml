@@ -7,7 +7,14 @@ settings:
 importers:
 
   .:
+    dependencies:
+      hyparquet:
+        specifier: ^1.33.0
+        version: 1.33.0
     devDependencies:
+      '@mdi/js':
+        specifier: ^7.4.47
+        version: 7.4.47
       '@sveltejs/adapter-static':
         specifier: ^4.0.1
         version: 4.0.1(@sveltejs/kit@3.1.1(@sveltejs/vite-plugin-svelte@7.3.1(svelte@5.57.3)(vite@8.3.6(@types/node@24.19.2)))(svelte@5.57.3)(typescript@6.0.3)(vite@8.3.6(@types/node@24.19.2)))
@@ -50,6 +57,9 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@mdi/js@7.4.47':
+    resolution: {integrity: sha512-KPnNOtm5i2pMabqZxpUz7iQf+mfrYZyKCZ8QNz85czgEt7cuHcGorWfdzUMWYA0SD+a6Hn4FmJ+YhzzzjkTZrQ==}
 
   '@oxc-project/types@0.156.0':
     resolution: {integrity: sha512-1Duyg48TdJNdyhEB8Xn1L36bT9Pv6GUtlKjHxOys8xkaF/rQq3XJE+bAurSK/AgIz5mGFsb77cn9Pb20+WCScw==}
@@ -262,6 +272,9 @@ packages:
     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
+
+  hyparquet@1.33.0:
+    resolution: {integrity: sha512-8EKLe73vRIMEKVEOe5y+kIzFxo6AvbLvd5ukd7P+yv3RvG0+TZM4qO8imbqxU6zds5pV+OeWRTMwy95mhHUheg==}
 
   is-reference@3.0.3:
     resolution: {integrity: sha512-ixkJoqQvAP88E6wLydLGGqCJsrFUnqoH6HnaczB8XmDH1oaWU+xxdptvikTgaEhtZ53Ky6YXiBuUI2WXLMCwjw==}
@@ -501,6 +514,8 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.6.0
 
+  '@mdi/js@7.4.47': {}
+
   '@oxc-project/types@0.156.0': {}
 
   '@polka/url@1.0.0-next.29': {}
@@ -627,6 +642,8 @@ snapshots:
 
   fsevents@2.3.3:
     optional: true
+
+  hyparquet@1.33.0: {}
 
   is-reference@3.0.3:
     dependencies:

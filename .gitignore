@@ -17,6 +17,7 @@ htmlcov/
 dataset/raw/
 dataset/cache/
 dataset/*.parquet
+website/static/occupations_text.parquet
 
 # Website (Node / SvelteKit / Vite)
 node_modules/

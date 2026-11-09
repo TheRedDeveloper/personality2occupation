@@ -1,0 +1,74 @@
+{
+  "self-direction-thought": {
+    "title": "Self-direction: thought",
+    "italic": "Freedom to cultivate one's own ideas and abilities."
+  },
+  "self-direction-action": {
+    "title": "Self-direction: action",
+    "italic": "Freedom to determine one's own actions."
+  },
+  "stimulation": {
+    "title": "Stimulation",
+    "italic": "Excitement, novelty, and change."
+  },
+  "achievement": {
+    "title": "Achievement",
+    "italic": "Success according to social standards."
+  },
+  "power-dominance": {
+    "title": "Power: dominance",
+    "italic": "Power through exercising control over people."
+  },
+  "power-resources": {
+    "title": "Power: resources",
+    "italic": "Power through control of material and social resources."
+  },
+  "face": {
+    "title": "Face",
+    "italic": "Security and power through maintaining one’s public image and avoiding humiliation."
+  },
+  "security-personal": {
+    "title": "Security: personal",
+    "italic": "Safety in one's immediate environment."
+  },
+  "security-societal": {
+    "title": "Security: societal",
+    "italic": "Safety and stability in the wider society."
+  },
+  "tradition": {
+    "title": "Tradition",
+    "italic": "Maintaining and preserving cultural, family, or religious traditions."
+  },
+  "conformity-rules": {
+    "title": "Conformity: rules",
+    "italic": "Compliance with rules, laws, and formal obligations."
+  },
+  "conformity-interpersonal": {
+    "title": "Conformity: interpersonal",
+    "italic": "Avoidance of upsetting or harming other people."
+  },
+  "humility": {
+    "title": "Humility",
+    "italic": "Recognizing one's insignificance in the larger scheme of things."
+  },
+  "benevolence-caring": {
+    "title": "Benevolence: caring",
+    "italic": "Devotion to the welfare of in-group members."
+  },
+  "benevolence-dependability": {
+    "title": "Benevolence: dependability",
+    "italic": "Being a reliable and trustworthy member of the in-group."
+  },
+  "universalism-concern": {
+    "title": "Universalism: concern",
+    "italic": "Commitment to equality, justice, and protection for all people."
+  },
+  "universalism-nature": {
+    "title": "Universalism: nature",
+    "italic": "Preservation of the natural environment."
+  },
+  "universalism-tolerance": {
+    "title": "Universalism: tolerance",
+    "italic": "Acceptance and understanding of those who are different from oneself."
+  }
+}

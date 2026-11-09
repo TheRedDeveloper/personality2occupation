@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "imports": {
+    "#lib/*": "./src/lib/*"
+  },
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
@@ -10,6 +13,7 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
   },
   "devDependencies": {
+    "@mdi/js": "^7.4.47",
     "@sveltejs/adapter-static": "^4.0.1",
     "@sveltejs/kit": "^3.1.1",
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
@@ -18,5 +22,8 @@
     "svelte-check": "^4.7.7",
     "typescript": "~6.0.3",
     "vite": "^8.3.6"
+  },
+  "dependencies": {
+    "hyparquet": "^1.33.0"
   }
 }

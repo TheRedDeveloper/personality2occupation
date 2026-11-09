@@ -3,11 +3,34 @@
 </script>
 
 <svelte:head>
-  <title>Career Personality Test | Personality to Occupation</title>
+  <title>Free Career Personality Test | personality2occupation (p2o)</title>
   <meta
     name="description"
-    content="Take our free interactive career personality test to discover occupations aligned with your traits."
+    content="Take our free interactive career personality test to discover occupations empirically aligned with your Big Five traits and Schwartz values."
   />
+  <link rel="canonical" href="https://thereddeveloper.github.io/personality2occupation/test" />
+
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://thereddeveloper.github.io/personality2occupation/test" />
+  <meta property="og:title" content="Free Career Personality Test | personality2occupation (p2o)" />
+  <meta
+    property="og:description"
+    content="Take our free interactive career personality test to discover occupations empirically aligned with your Big Five traits and Schwartz values."
+  />
+  <meta property="og:image" content="https://thereddeveloper.github.io/personality2occupation/og-image.png" />
+  <meta property="og:site_name" content="personality2occupation" />
+  <meta property="og:locale" content="en_US" />
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:url" content="https://thereddeveloper.github.io/personality2occupation/test" />
+  <meta name="twitter:title" content="Free Career Personality Test | personality2occupation (p2o)" />
+  <meta
+    name="twitter:description"
+    content="Take our free interactive career personality test to discover occupations empirically aligned with your Big Five traits and Schwartz values."
+  />
+  <meta name="twitter:image" content="https://thereddeveloper.github.io/personality2occupation/og-image.png" />
 </svelte:head>
 
 <main>
