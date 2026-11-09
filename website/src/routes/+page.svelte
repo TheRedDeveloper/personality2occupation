@@ -2,6 +2,7 @@
   import { resolve, asset } from '$app/paths';
   import PointCloudHero from '#lib/PointCloudHero.svelte';
   import SchwartzCircle from '#lib/SchwartzCircle.svelte';
+  import AnimatedLogo from '#lib/AnimatedLogo.svelte';
   import { mdiArrowRight, mdiDownload, mdiGithub, mdiOpenInNew } from '#lib/icons.ts';
 
   const bigFiveTraits = [
@@ -122,7 +123,9 @@
   <!-- Hero Section -->
   <section class="hero-section">
     <div class="hero-left">
-      <img src={asset('logo.svg')} alt="p2o" class="hero-logo" width="130" height="130" />
+      <div class="hero-logo-box">
+        <AnimatedLogo width="130" height="130" />
+      </div>
       <h1 class="hero-title">personality2occupation</h1>
       <p class="hero-desc">
         A free and open-source career orientation tool that matches your behavioral traits and core values to
@@ -400,11 +403,23 @@
     width: 100%;
   }
 
-  .hero-logo {
+  @keyframes heroFadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .hero-logo-box {
     display: block;
     width: 130px;
     height: 130px;
     margin-bottom: 0.65rem;
+    animation: heroFadeIn 0.45s cubic-bezier(0.16, 1, 0.3, 1) backwards;
   }
 
   .hero-title {
@@ -417,6 +432,7 @@
     color: #ffffff;
     line-height: 1.15;
     white-space: nowrap;
+    animation: heroFadeIn 0.45s cubic-bezier(0.16, 1, 0.3, 1) 0.08s backwards;
   }
 
   .hero-desc {
@@ -424,17 +440,32 @@
     line-height: 1.6;
     color: #999999;
     margin: 0 0 1.5rem;
+    animation: heroFadeIn 0.45s cubic-bezier(0.16, 1, 0.3, 1) 0.16s backwards;
   }
 
   .hero-actions {
     display: flex;
     gap: 1rem;
+    animation: heroFadeIn 0.45s cubic-bezier(0.16, 1, 0.3, 1) 0.24s backwards;
   }
 
   .hero-right {
     display: flex;
     justify-content: center;
     align-items: center;
+    animation: heroFadeIn 0.55s cubic-bezier(0.16, 1, 0.3, 1) 0.12s backwards;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hero-logo-box,
+    .hero-title,
+    .hero-desc,
+    .hero-actions,
+    .hero-right {
+      animation: none !important;
+      opacity: 1 !important;
+      transform: none !important;
+    }
   }
 
   .btn-primary {
