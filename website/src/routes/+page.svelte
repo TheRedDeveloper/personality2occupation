@@ -3,7 +3,7 @@
   import PointCloudHero from '#lib/PointCloudHero.svelte';
   import SchwartzCircle from '#lib/SchwartzCircle.svelte';
   import AnimatedLogo from '#lib/AnimatedLogo.svelte';
-  import { mdiArrowRight, mdiDownload, mdiGithub, mdiOpenInNew } from '#lib/icons.ts';
+  import { mdiArrowRight, mdiChevronDown, mdiDownload, mdiGithub, mdiOpenInNew } from '#lib/icons.ts';
 
   const bigFiveTraits = [
     'Openness',
@@ -22,6 +22,59 @@
   };
 
   let activeBigFive = $state<string | null>(null);
+
+  const faqList = [
+    {
+      question: 'How long does the test take?',
+      answer:
+        'The test is designed to deliver initial career recommendations in as little as 5 minutes (around 5 to 15 questions). The test always shows the most optimal question based on your previous answers to quickly pinpoint what sets you apart. While a few answers are often enough to discover your top matches, you can keep answering questions for as long as you like to continuously refine the precision and confidence of your results.'
+    },
+    {
+      question: 'Is this test truly free, and is my data private?',
+      answer:
+        'Yes, 100% free with zero catch. Unlike commercial career tests that make you answer dozens of questions only to lock your results behind paywalls or demand your email for marketing, personality2occupation never asks for your email, has no paywalls, and stores no cookies. The entire matching engine runs locally inside your browser, nothing is ever sent to or stored on any server.'
+    },
+    {
+      question: 'How is this scientifically credible compared to tests like MBTI or 16Personalities?',
+      answer:
+        'Popular tests like MBTI or 16Personalities force people into rigid, arbitrary 4-letter personality boxes that academic psychologists have widely criticized for low reliability. In contrast, this project is grounded in the peer-reviewed Big Five personality framework and Shalom Schwartz\'s Theory of Basic Human Values. Rather than assigning you an imaginary archetype, we measure you across 24 continuous dimensions and mathematically compare your profile against empirical data from 111,472 working professionals across 2,108 real-world careers. And each of our >1,000 questions is judged across those dimensions using those same measurements based on Machine Learning.'
+    },
+    {
+      question: 'What are the 8 sectors?',
+      answer:
+        'During your first few answers, the test reveals your probability alignment across 8 broad macroeconomic labor sectors before zeroing in on specific occupations.',
+      sectors: [
+        { name: 'Technology, Software & Engineering', color: '#00E5FF' },
+        { name: 'Arts, Design & Entertainment', color: '#D500F9' },
+        { name: 'Public, Law, Defense & Civil', color: '#FF1744' },
+        { name: 'Trades, Construction & Extraction', color: '#A1887F' },
+        { name: 'Education, Academia & Research', color: '#3D5AFE' },
+        { name: 'Corporate, Finance & Commercial', color: '#FFD600' },
+        { name: 'Healthcare, Medical & Wellness', color: '#00E676' },
+        { name: 'Writing, Journalism & Media', color: '#FF9100' }
+      ]
+    },
+    {
+      question: 'What is the "Niche vs Market" slider?',
+      answer:
+        'A common flaw with career tests is recommending obscure dream jobs that have almost zero real-world openings. In this test, an interactive slider lets you balance pure psychological fit against labor market scale. You can tune the results toward enabling rare, highly tailored niche callings, or slide toward career fields with strong real-world job availability.'
+    },
+    {
+      question: 'Can I save or share my results with someone else?',
+      answer:
+        'Yes. Clicking the Share button in the test creates a permanent, ultra-compact URL containing an encoded snapshot of just your responses. Because the engine is completely deterministic, anyone opening your link will see your exact career matches. They can also choose to continue the test from where you left off, without any data ever touching a database.'
+    },
+    {
+      question: 'Why does the test match personality and values instead of technical skills?',
+      answer:
+        'Technical skills change rapidly, and in modern industries, specific tools and requirments can become obsolete within a few years. Humans can learn new skills, but core personality traits and intrinsic values remain remarkably stable across a lifetime. When your underlying temperament and values harmonize with the daily reality and culture of a profession, acquiring the required skills happens naturally.'
+    },
+    {
+      question: 'Is this test for desktop or mobile?',
+      answer:
+        'The test works perfectly on all platforms, including mobile phones, tablets, and desktop computers. On desktop, keyboard shortcuts allow for even faster answering. Mobile users and people with slow internet can experience slight delays while loading the test.'
+    }
+  ];
 
   const structuredData = [
     {
@@ -81,6 +134,24 @@
           'contentUrl': 'https://thereddeveloper.github.io/personality2occupation/occupations_personality.parquet'
         }
       ]
+    },
+    {
+      '@context': 'https://schema.org',
+      '@type': 'FAQPage',
+      'mainEntity': faqList.map((faq) => {
+        let answerText = faq.answer;
+        if (faq.sectors && faq.sectors.length > 0) {
+          answerText += ' ' + faq.sectors.map((s) => s.name).join('; ');
+        }
+        return {
+          '@type': 'Question',
+          'name': faq.question,
+          'acceptedAnswer': {
+            '@type': 'Answer',
+            'text': answerText
+          }
+        };
+      })
     }
   ];
 </script>
@@ -133,7 +204,7 @@
       </p>
       <div class="hero-actions">
         <a href={resolve('/test')} class="btn-primary">
-          <span>Take Test</span>
+          <span>Take 5min test</span>
           <svg viewBox="0 0 24 24" class="icon" aria-hidden="true">
             <path fill="currentColor" d={mdiArrowRight} />
           </svg>
@@ -151,8 +222,9 @@
     <h2>How It Works</h2>
     <div class="prose">
       <p>
-        Most career tests rely on arbitrary question heuristics or unvalidated archetypes. This project is built on
-        empirical distributions observed directly from real people in their actual jobs.
+        Most online career tests lure you in with unvalidated archetypes, lock your results behind paywalls,
+        and harvest your personal data. This project is completely free, 100% private, and built on empirical
+        distributions observed directly from real people in their actual jobs.
       </p>
       <p>
         The dataset aggregates over 192 million words from 111,472 anonymized author profiles across Reddit,
@@ -341,6 +413,36 @@
           </a>
         </div>
       </div>
+    </div>
+  </section>
+
+  <!-- Frequently Asked Questions -->
+  <section class="section faq-section">
+    <h2>Frequently Asked Questions</h2>
+    <div class="faq-list">
+      {#each faqList as faq}
+        <details class="faq-item">
+          <summary class="faq-summary">
+            <span class="faq-question">{faq.question}</span>
+            <svg viewBox="0 0 24 24" class="icon-chevron" aria-hidden="true">
+              <path fill="currentColor" d={mdiChevronDown} />
+            </svg>
+          </summary>
+          <div class="faq-answer">
+            <p>{faq.answer}</p>
+            {#if faq.sectors}
+              <div class="faq-sectors-grid">
+                {#each faq.sectors as sec}
+                  <div class="faq-sector-item">
+                    <span class="faq-sector-dot" style="background-color: {sec.color};"></span>
+                    <span>{sec.name}</span>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        </details>
+      {/each}
     </div>
   </section>
 
@@ -718,6 +820,105 @@
     width: 16px;
     height: 16px;
     display: block;
+  }
+
+  /* FAQ Section */
+  .faq-section {
+    margin-top: 1rem;
+  }
+
+  .faq-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+  }
+
+  details.faq-item {
+    background-color: #0c0c0c;
+    border: 1px solid #1a1a1a;
+    border-radius: 8px;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+    overflow: hidden;
+  }
+
+  details.faq-item:hover {
+    border-color: #2a2a2a;
+    background-color: #0f0f0f;
+  }
+
+  details.faq-item[open] {
+    border-color: #2e2e2e;
+    background-color: #0d0d0d;
+  }
+
+  summary.faq-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1.15rem 1.4rem;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+    gap: 1rem;
+  }
+
+  summary.faq-summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .faq-question {
+    font-size: 1.02rem;
+    font-weight: 600;
+    color: #ffffff;
+    line-height: 1.4;
+  }
+
+  .icon-chevron {
+    width: 20px;
+    height: 20px;
+    color: #777777;
+    flex-shrink: 0;
+    transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), color 0.15s ease;
+  }
+
+  details.faq-item[open] .icon-chevron {
+    transform: rotate(180deg);
+    color: #ffffff;
+  }
+
+  .faq-answer {
+    padding: 0 1.4rem 1.25rem 1.4rem;
+    color: #a3a3a3;
+    font-size: 0.95rem;
+    line-height: 1.65;
+  }
+
+  .faq-answer p {
+    margin: 0;
+  }
+
+  .faq-sectors-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 0.65rem 1rem;
+    margin-top: 1rem;
+    padding-top: 0.9rem;
+    border-top: 1px solid #1a1a1a;
+  }
+
+  .faq-sector-item {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    font-size: 0.85rem;
+    color: #d4d4d4;
+  }
+
+  .faq-sector-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
   }
 
   /* Footer */
