@@ -29,5 +29,9 @@ dist/
 .env.*
 !.env.example
 
+# Nested gh-pages git
+build/.git/
+website/build/.git/
+
 # Logs
 *.log
