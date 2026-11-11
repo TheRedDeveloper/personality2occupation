@@ -721,57 +721,28 @@ export class TestEngine {
     const nextUncertainty = new Array(DIM);
     const traitPrecision = new Float32Array(DIM).fill(1.0); // Prior precision = 1.0
 
-    if (this.testVersion === 4) {
-      // V4: IRT Information Scaling - Prevents signal dilution over many questions
-      const devSum = new Float32Array(DIM);
+    // V4 IRT Information Scaling - Prevents signal dilution over many questions
+    const devSum = new Float32Array(DIM);
 
-      for (const item of this.answeredHistory) {
-        for (let d = 0; d < DIM; d++) {
-          const normW = item.question.gradient[d] / this.gradMaxV2[d];
-          const absW = Math.abs(normW);
-          if (absW > 0.10) {
-            const weight = absW * absW * 2.5;
-            const shift = item.k * Math.sign(normW) * this.popStd[d] * 2.2;
-            devSum[d] += weight * shift;
-            traitPrecision[d] += weight;
-          }
+    for (const item of this.answeredHistory) {
+      for (let d = 0; d < DIM; d++) {
+        const normW = item.question.gradient[d] / this.gradMaxV2[d];
+        const absW = Math.abs(normW);
+        if (absW > 0.10) {
+          const weight = absW * absW * 2.5;
+          const shift = item.k * Math.sign(normW) * this.popStd[d] * 2.2;
+          devSum[d] += weight * shift;
+          traitPrecision[d] += weight;
         }
       }
+    }
 
-      const power = 0.55;
-      const refFactor = Math.pow(4.5, 1.0 - power);
-      for (let d = 0; d < DIM; d++) {
-        const divisor = Math.pow(traitPrecision[d], power) * refFactor;
-        nextVector[d] = Math.max(0.0, Math.min(1.0, this.popMean[d] + devSum[d] / divisor));
-        nextUncertainty[d] = 1.0 / Math.sqrt(traitPrecision[d]);
-      }
-    } else {
-      // Legacy V1, V2, V3 Bayesian Precision Average
-      const weightedEvidenceSum = new Float32Array(DIM);
-      for (let d = 0; d < DIM; d++) {
-        weightedEvidenceSum[d] = this.popMean[d] * 1.0;
-      }
-
-      for (const item of this.answeredHistory) {
-        for (let d = 0; d < DIM; d++) {
-          const normW = item.question.gradient[d] / this.gradMaxV2[d];
-          const absW = Math.abs(normW);
-          if (absW > 0.10) {
-            const weight = absW * absW * 2.5;
-            const evidence = Math.max(
-              0.0,
-              Math.min(1.0, this.popMean[d] + item.k * Math.sign(normW) * this.popStd[d] * 2.2)
-            );
-            weightedEvidenceSum[d] += weight * evidence;
-            traitPrecision[d] += weight;
-          }
-        }
-      }
-
-      for (let d = 0; d < DIM; d++) {
-        nextVector[d] = weightedEvidenceSum[d] / traitPrecision[d];
-        nextUncertainty[d] = 1.0 / Math.sqrt(traitPrecision[d]);
-      }
+    const power = 0.55;
+    const refFactor = Math.pow(4.5, 1.0 - power);
+    for (let d = 0; d < DIM; d++) {
+      const divisor = Math.pow(traitPrecision[d], power) * refFactor;
+      nextVector[d] = Math.max(0.0, Math.min(1.0, this.popMean[d] + devSum[d] / divisor));
+      nextUncertainty[d] = 1.0 / Math.sqrt(traitPrecision[d]);
     }
 
     this.userVector = nextVector;
