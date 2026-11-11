@@ -47,6 +47,7 @@ export interface JobMatch {
   rank: number;
   title: string;
   matchScore: number;
+  rawFit: number;
   sampleCount: number;
   sectorName: string;
   sectorColor: string;
@@ -114,7 +115,7 @@ export const K_CHOICES: Record<number, number> = {
 const STORAGE_KEY = 'p2o_test_state_v1';
 
 export interface DecodedResult {
-  version: 1 | 2 | 3;
+  version: 1 | 2 | 3 | 4;
   choices: number[];
 }
 
@@ -123,13 +124,13 @@ export interface DecodedResult {
  * Since the test question selection is 100% deterministic given prior choices,
  * we only need to encode the 3-bit Likert choice (1..5 -> 0..4) for each step!
  *
- * Byte 0: format version (1 for v1 legacy, 2 for v2, 3 for modern v3 CAT)
+ * Byte 0: format version (1 for v1 legacy, 2 for v2, 3 for v3 CAT, 4 for modern v4 IRT)
  * Byte 1: question count (N)
  * Bytes 2+: bitstream of 3-bit choices (N * 3 bits packed MSB-first)
  *
  * Size: 5 questions = 6 chars, 9 questions = 8 chars, 30 questions = 19 chars!
  */
-export function encodeResultChoices(history: AnswerHistoryItem[], version: 1 | 2 | 3 = 3): string {
+export function encodeResultChoices(history: AnswerHistoryItem[], version: 1 | 2 | 3 | 4 = 4): string {
   const count = history.length;
   if (count === 0) return '';
 
@@ -137,7 +138,7 @@ export function encodeResultChoices(history: AnswerHistoryItem[], version: 1 | 2
   const payloadBytes = Math.ceil(totalBits / 8);
   const bytes = new Uint8Array(2 + payloadBytes);
 
-  bytes[0] = version; // format version (1, 2, or 3)
+  bytes[0] = version; // format version (1, 2, 3, or 4)
   bytes[1] = Math.min(255, count);
 
   let bitOffset = 0;
@@ -178,10 +179,10 @@ export function decodeResultChoices(encoded: string): DecodedResult | null {
 
     if (bytes.length < 2) return null;
     const version = bytes[0];
-    if (version !== 1 && version !== 2 && version !== 3) return null;
+    if (version !== 1 && version !== 2 && version !== 3 && version !== 4) return null;
 
     const count = bytes[1];
-    if (count === 0) return { version: version as 1 | 2 | 3, choices: [] };
+    if (count === 0) return { version: version as 1 | 2 | 3 | 4, choices: [] };
 
     const expectedPayload = Math.ceil((count * 3) / 8);
     if (bytes.length < 2 + expectedPayload) return null;
@@ -200,7 +201,7 @@ export function decodeResultChoices(encoded: string): DecodedResult | null {
       choices.push(choiceVal + 1); // convert 0..4 back to 1..5
     }
 
-    return { version: version as 1 | 2 | 3, choices };
+    return { version: version as 1 | 2 | 3 | 4, choices };
   } catch (e) {
     console.warn('Failed to decode shared choices:', e);
     return null;
@@ -214,8 +215,8 @@ export class TestEngine {
   loadingMessage = $state('Loading 1,141 neural question gradients and 2,108 canonical career distributions...');
   loadError = $state<string | null>(null);
 
-  // Engine Version (1 for legacy replay, 2 for v2 replay, 3 for modern v3 active testing)
-  testVersion = $state<1 | 2 | 3>(3);
+  // Engine Version (1 for legacy replay, 2 for v2 replay, 3 for v3 CAT, 4 for modern v4 active testing)
+  testVersion = $state<1 | 2 | 3 | 4>(4);
 
   // Core Data
   questions: QuestionRecord[] = [];
@@ -431,9 +432,10 @@ export class TestEngine {
    * Deterministically replay test choices using adaptive question selection.
    * If version === 1, uses the exact legacy V1 question sequence.
    * If version === 2, uses the V2 marginal variance reduction sequence.
-   * If version === 3, uses the modern V3 candidate disambiguation sequence.
+   * If version === 3, uses the V3 candidate disambiguation sequence.
+   * If version === 4, uses the modern V4 IRT candidate sequence.
    */
-  private async reconstructFromChoices(choices: number[], version: 1 | 2 | 3) {
+  private async reconstructFromChoices(choices: number[], version: 1 | 2 | 3 | 4) {
     this.answeredHistory = [];
     this.redoStack = [];
     this.alpha = 0.5;
@@ -560,7 +562,7 @@ export class TestEngine {
     this.answeredHistory = [];
     this.redoStack = [];
     this.alpha = 0.5;
-    this.testVersion = 3; // Always reset to modern v3 engine
+    this.testVersion = 4; // Always reset to modern v4 engine
     this.isViewingSharedResult = false;
     this.recomputeState();
     this.clearStorage();
@@ -718,32 +720,58 @@ export class TestEngine {
     const nextVector = new Array(DIM);
     const nextUncertainty = new Array(DIM);
     const traitPrecision = new Float32Array(DIM).fill(1.0); // Prior precision = 1.0
-    const weightedEvidenceSum = new Float32Array(DIM);
-    for (let d = 0; d < DIM; d++) {
-      weightedEvidenceSum[d] = this.popMean[d] * 1.0;
-    }
 
-    for (const item of this.answeredHistory) {
-      for (let d = 0; d < DIM; d++) {
-        const normW = item.question.gradient[d] / this.gradMaxV2[d];
-        const absW = Math.abs(normW);
-        // Noise floor threshold: only questions that meaningfully touch trait d provide evidence
-        if (absW > 0.10) {
-          // Quadratic weighting: primary traits (absW ~ 0.8) have ~25x the weight of secondary touches (absW ~ 0.15)
-          const weight = absW * absW * 2.5;
-          const evidence = Math.max(
-            0.0,
-            Math.min(1.0, this.popMean[d] + item.k * Math.sign(normW) * this.popStd[d] * 2.2)
-          );
-          weightedEvidenceSum[d] += weight * evidence;
-          traitPrecision[d] += weight;
+    if (this.testVersion === 4) {
+      // V4: IRT Information Scaling - Prevents signal dilution over many questions
+      const devSum = new Float32Array(DIM);
+
+      for (const item of this.answeredHistory) {
+        for (let d = 0; d < DIM; d++) {
+          const normW = item.question.gradient[d] / this.gradMaxV2[d];
+          const absW = Math.abs(normW);
+          if (absW > 0.10) {
+            const weight = absW * absW * 2.5;
+            const shift = item.k * Math.sign(normW) * this.popStd[d] * 2.2;
+            devSum[d] += weight * shift;
+            traitPrecision[d] += weight;
+          }
         }
       }
-    }
 
-    for (let d = 0; d < DIM; d++) {
-      nextVector[d] = weightedEvidenceSum[d] / traitPrecision[d];
-      nextUncertainty[d] = 1.0 / Math.sqrt(traitPrecision[d]);
+      const power = 0.55;
+      const refFactor = Math.pow(4.5, 1.0 - power);
+      for (let d = 0; d < DIM; d++) {
+        const divisor = Math.pow(traitPrecision[d], power) * refFactor;
+        nextVector[d] = Math.max(0.0, Math.min(1.0, this.popMean[d] + devSum[d] / divisor));
+        nextUncertainty[d] = 1.0 / Math.sqrt(traitPrecision[d]);
+      }
+    } else {
+      // Legacy V1, V2, V3 Bayesian Precision Average
+      const weightedEvidenceSum = new Float32Array(DIM);
+      for (let d = 0; d < DIM; d++) {
+        weightedEvidenceSum[d] = this.popMean[d] * 1.0;
+      }
+
+      for (const item of this.answeredHistory) {
+        for (let d = 0; d < DIM; d++) {
+          const normW = item.question.gradient[d] / this.gradMaxV2[d];
+          const absW = Math.abs(normW);
+          if (absW > 0.10) {
+            const weight = absW * absW * 2.5;
+            const evidence = Math.max(
+              0.0,
+              Math.min(1.0, this.popMean[d] + item.k * Math.sign(normW) * this.popStd[d] * 2.2)
+            );
+            weightedEvidenceSum[d] += weight * evidence;
+            traitPrecision[d] += weight;
+          }
+        }
+      }
+
+      for (let d = 0; d < DIM; d++) {
+        nextVector[d] = weightedEvidenceSum[d] / traitPrecision[d];
+        nextUncertainty[d] = 1.0 / Math.sqrt(traitPrecision[d]);
+      }
     }
 
     this.userVector = nextVector;
@@ -775,7 +803,7 @@ export class TestEngine {
     } catch (e) {}
   }
 
-  private readStorage(): { version: 1 | 2 | 3; history: AnswerHistoryItem[]; alpha: number } | null {
+  private readStorage(): { version: 1 | 2 | 3 | 4; history: AnswerHistoryItem[]; alpha: number } | null {
     if (typeof window === 'undefined') return null;
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -794,7 +822,9 @@ export class TestEngine {
         }
       }
 
-      const version: 1 | 2 | 3 = data.version === 1 ? 1 : (data.version === 2 ? 2 : 3);
+      const version: 1 | 2 | 3 | 4 = (data.version === 1 || data.version === 2 || data.version === 3 || data.version === 4)
+        ? data.version
+        : 4;
       const alpha = typeof data.alpha === 'number' ? Math.max(0, Math.min(1, data.alpha)) : 0.5;
       return { version, history, alpha };
     } catch (e) {
@@ -824,8 +854,10 @@ export class TestEngine {
       this.pickNextQuestionV1();
     } else if (this.testVersion === 2) {
       this.pickNextQuestionV2();
-    } else {
+    } else if (this.testVersion === 3) {
       this.pickNextQuestionV3();
+    } else {
+      this.pickNextQuestionV4();
     }
   }
 
@@ -1058,6 +1090,81 @@ export class TestEngine {
     this.currentQuestion = bestQuestion;
   }
 
+  private pickNextQuestionV4() {
+    if (this.questions.length === 0) {
+      this.currentQuestion = null;
+      return;
+    }
+
+    // Initial Anchor Question
+    if (this.answeredHistory.length === 0) {
+      this.currentQuestion = this.questions[0];
+      return;
+    }
+
+    // Identify candidate divergence across top 25 candidate occupations by RAW FIT (unbiased by market sample prior)
+    // This breaks the closed confirmation loop where mega-occupations monopolize question divergence.
+    const rawCandidates = [...this.topJobs]
+      .sort((a, b) => b.rawFit - a.rawFit)
+      .slice(0, 25);
+    const candidateDivRatio = new Float32Array(DIM);
+
+    if (rawCandidates.length > 1) {
+      const topOccs: OccupationRecord[] = [];
+      for (const c of rawCandidates) {
+        const occ = this.occupations.find(o => o.title === c.title);
+        if (occ) topOccs.push(occ);
+      }
+
+      if (topOccs.length > 1) {
+        for (let d = 0; d < DIM; d++) {
+          let sum = 0;
+          for (const occ of topOccs) sum += occ.mean[d];
+          const avg = sum / topOccs.length;
+          let ssq = 0;
+          for (const occ of topOccs) {
+            const diff = occ.mean[d] - avg;
+            ssq += diff * diff;
+          }
+          const candidateStd = Math.sqrt(ssq / topOccs.length);
+          candidateDivRatio[d] = candidateStd / (this.popStd[d] || 0.01);
+        }
+      }
+    }
+
+    let bestQuestion: QuestionRecord | null = null;
+    let maxGain = -Infinity;
+
+    for (const q of this.questions) {
+      if (this.askedQuestionIds.has(q.id)) continue;
+
+      let gain = 0;
+      for (let d = 0; d < DIM; d++) {
+        const normW = Math.abs(q.gradient[d]) / this.gradMaxV2[d];
+        if (normW <= 0.10) continue;
+
+        // V4 Quadratic Evidence Precision: directly aligns with IRT information model
+        const dPrec = normW * normW * 2.5;
+        const curPrec = 1.0 / (this.userUncertainty[d] ** 2);
+        const deltaVar = dPrec / (curPrec * (curPrec + dPrec));
+
+        // Candidate Disambiguation Weight:
+        // Early questions (< 4): foundational trait anchoring
+        // Later questions (>= 4): discriminate between active psychometric candidate occupations
+        const careerWeight = this.answeredHistory.length < 4 ? 0.25 : (candidateDivRatio[d] * 2.5);
+        const foundationalBonus = d < 5 ? 1.2 : 1.0;
+        gain += deltaVar * (1.0 + careerWeight) * foundationalBonus;
+      }
+
+      if (gain > maxGain) {
+        maxGain = gain;
+        bestQuestion = q;
+      }
+    }
+
+    this.currentQuestion = bestQuestion;
+  }
+
   private recalculateMatches() {
     if (this.occupations.length === 0) return;
     const nJobs = this.occupations.length;
@@ -1185,6 +1292,7 @@ export class TestEngine {
       rank: idx + 1,
       title: job.title,
       matchScore: job.matchScore,
+      rawFit: job.rawFit,
       sampleCount: job.sampleCount,
       sectorName: job.sectorName,
       sectorColor: job.sectorColor

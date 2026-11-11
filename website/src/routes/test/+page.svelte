@@ -2,9 +2,36 @@
   import { onMount } from 'svelte';
   import { asset } from '$app/paths';
   import { testEngine } from '#lib/testEngine.svelte.ts';
-  import { DIMENSIONS } from '#lib/dimensions.ts';
+  import SchwartzCircle from '#lib/SchwartzCircle.svelte';
 
   const engine = testEngine;
+
+  const bigFiveTraits = [
+    'Openness',
+    'Conscientiousness',
+    'Extraversion',
+    'Agreeableness',
+    'Neuroticism'
+  ];
+
+  const bigFiveDescriptions: Record<string, string> = {
+    'Openness': 'Curiosity, imagination, and exploration of new ideas.',
+    'Conscientiousness': 'Organization, self-discipline, and dependability.',
+    'Extraversion': 'Social energy, assertiveness, and enthusiasm.',
+    'Agreeableness': 'Compassion, empathy, and trusting cooperation.',
+    'Neuroticism': 'Emotional sensitivity, anxiety, and stress reactivity.'
+  };
+
+  let activeBigFive = $state<string | null>(null);
+  let hasContinuedPast30 = $state(false);
+
+  $effect(() => {
+    if (engine.answeredCount < 30) {
+      hasContinuedPast30 = false;
+    } else if (engine.answeredCount > 30) {
+      hasContinuedPast30 = true;
+    }
+  });
 
   onMount(() => {
     engine.init();
@@ -15,6 +42,7 @@
       }
 
       if (['1', '2', '3', '4', '5'].includes(e.key)) {
+        if (engine.answeredCount === 30 && !hasContinuedPast30) return;
         e.preventDefault();
         engine.answer(Number(e.key));
       } else if (e.ctrlKey && e.key.toLowerCase() === 'z') {
@@ -99,36 +127,51 @@
         <button type="button" class="btn-retry" onclick={() => engine.init()}>Retry Loading</button>
       </div>
     {:else}
-      <!-- 1. Active Question Prompt (Only shown when taking test, NOT when inspecting shared result) -->
-      {#if engine.currentQuestion && !engine.isViewingSharedResult}
-        <section class="question-section" aria-label="Current Question">
-          <div class="statement-wrapper">
-            <h1 class="statement-prompt">
-              I {engine.currentQuestion.text}.
-            </h1>
-
-            <!-- 5-Point Circular Likert Component -->
-            <div class="likert-container" role="group" aria-label="Likert Scale Choices">
-              {#each LIKERT_OPTIONS as opt}
-                <button
-                  type="button"
-                  class="likert-choice opt-{opt.value}"
-                  onclick={() => engine.answer(opt.value)}
-                  aria-label="{opt.label} ({opt.value})"
-                >
-                  <div class="likert-circle">
-                    <span>{opt.value}</span>
-                  </div>
-                  <span class="likert-label">{opt.label}</span>
-                </button>
-              {/each}
+      <!-- 1. Active Question Prompt or Q30 Completion Box (Only shown when taking test, NOT when inspecting shared result) -->
+      {#if !engine.isViewingSharedResult}
+        {#if engine.answeredCount === 30 && !hasContinuedPast30}
+          <section class="completion-section" aria-label="Core Test Completed">
+            <div class="completion-box" role="status">
+              <span class="completion-text">You've completed the core test! Your career matches are calibrated.</span>
+              <button
+                type="button"
+                class="btn-continue-anyways"
+                onclick={() => (hasContinuedPast30 = true)}
+              >
+                Continue Anyways
+              </button>
             </div>
+          </section>
+        {:else if engine.currentQuestion}
+          <section class="question-section" aria-label="Current Question">
+            <div class="statement-wrapper">
+              <h1 class="statement-prompt">
+                I {engine.currentQuestion.text}.
+              </h1>
 
-            <div class="desktop-shortcut-hint">
-              <span>Press <kbd>1</kbd> through <kbd>5</kbd> on your keyboard</span>
+              <!-- 5-Point Circular Likert Component -->
+              <div class="likert-container" role="group" aria-label="Likert Scale Choices">
+                {#each LIKERT_OPTIONS as opt}
+                  <button
+                    type="button"
+                    class="likert-choice opt-{opt.value}"
+                    onclick={() => engine.answer(opt.value)}
+                    aria-label="{opt.label} ({opt.value})"
+                  >
+                    <div class="likert-circle">
+                      <span>{opt.value}</span>
+                    </div>
+                    <span class="likert-label">{opt.label}</span>
+                  </button>
+                {/each}
+              </div>
+
+              <div class="desktop-shortcut-hint">
+                <span>Press <kbd>1</kbd> through <kbd>5</kbd> on your keyboard</span>
+              </div>
             </div>
-          </div>
-        </section>
+          </section>
+        {/if}
       {/if}
 
       <!-- 2. Dynamic Results Area: Sectors (Questions 1 to 4) -> Career Matches (Q6+) -->
@@ -201,46 +244,55 @@
         </section>
 
         <!-- 3. Openly Visible 24D Coordinates (Unlocks with Career Matches, without redundant title/divider) -->
-        <section class="traits-stage" aria-label="24D Personality and Value Coordinates">
-          <div class="traits-columns">
-            <!-- Big Five Behavior -->
-            <div class="trait-block">
-              <h3 class="trait-group-heading">Big Five Behavioral Traits</h3>
-              <div class="trait-rows">
-                {#each DIMENSIONS.slice(0, 5) as dim}
-                  <div class="trait-row">
-                    <span class="t-name" title={dim.description}>{dim.name}</span>
-                    <div class="t-track">
-                      <div
-                        class="t-fill"
-                        style="width: {(engine.userVector[dim.index] * 100).toFixed(0)}%"
-                      ></div>
-                    </div>
-                    <span class="t-val">{(engine.userVector[dim.index] * 100).toFixed(0)}%</span>
-                  </div>
+        <section class="traits-stage" aria-label="Personality and Values Profile">
+          <div class="dimensions-split">
+            <!-- Big Five column -->
+            <div class="dimension-col">
+              <h3 class="dimension-heading">Behavior (Big Five)</h3>
+              <p class="big5-lead">
+                The Big Five is the gold standard and top metric used in scientific psychology and behavioral research.
+              </p>
+              <ul class="big5-list">
+                {#each bigFiveTraits as trait, idx}
+                  {@const pct = Math.round(engine.userVector[idx] * 100)}
+                  <li class="big5-item">
+                    <button
+                      type="button"
+                      class="big5-btn"
+                      class:active={activeBigFive === trait}
+                      onmouseenter={() => (activeBigFive = trait)}
+                      onmouseleave={() => (activeBigFive = null)}
+                      onclick={() => (activeBigFive = activeBigFive === trait ? null : trait)}
+                      aria-label="{trait}: {pct}%"
+                    >
+                      <div class="big5-bar-fill" style="width: {pct}%"></div>
+                      <div class="big5-content">
+                        <span class="big5-name">{trait}</span>
+                        <span class="big5-pct">{pct}%</span>
+                      </div>
+                    </button>
+                  </li>
                 {/each}
+              </ul>
+              <div class="big5-caption-container">
+                {#if activeBigFive && bigFiveDescriptions[activeBigFive]}
+                  {@const activeIdx = bigFiveTraits.indexOf(activeBigFive)}
+                  {@const activePct = Math.round(engine.userVector[activeIdx] * 100)}
+                  <div class="big5-caption-header">
+                    <span class="big5-caption-title">{activeBigFive}</span>
+                    <span class="big5-caption-pct">{activePct}%</span>
+                  </div>
+                  <div class="big5-caption-desc">{bigFiveDescriptions[activeBigFive]}</div>
+                {:else}
+                  <div class="big5-caption-placeholder">Hover or tap any trait to see its meaning</div>
+                {/if}
               </div>
             </div>
 
-            <!-- Schwartz Values -->
-            <div class="trait-block">
-              <h3 class="trait-group-heading">Top Personal Values (Schwartz)</h3>
-              <div class="trait-rows">
-                {#each DIMENSIONS.slice(5) as dim}
-                  {#if engine.userVector[dim.index] > 0.08}
-                    <div class="trait-row">
-                      <span class="t-name" title={dim.description}>{dim.name}</span>
-                      <div class="t-track">
-                        <div
-                          class="t-fill value-fill"
-                          style="width: {Math.min(100, engine.userVector[dim.index] * 400).toFixed(0)}%"
-                        ></div>
-                      </div>
-                      <span class="t-val">{(engine.userVector[dim.index] * 100).toFixed(1)}%</span>
-                    </div>
-                  {/if}
-                {/each}
-              </div>
+            <!-- Schwartz circle column -->
+            <div class="dimension-col">
+              <h3 class="dimension-heading">Values (Schwartz)</h3>
+              <SchwartzCircle values={engine.userVector.slice(5, 24)} />
             </div>
           </div>
         </section>
@@ -272,8 +324,48 @@
   }
 
   /* Question Section */
-  .question-section {
+  .question-section,
+  .completion-section {
     width: 100%;
+  }
+
+  /* Q30 Single-Line Green Completion Box */
+  .completion-box {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.5rem;
+    background-color: rgba(16, 185, 129, 0.08);
+    border: 1px solid rgba(16, 185, 129, 0.4);
+    border-radius: 8px;
+    padding: 1rem 1.5rem;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  }
+
+  .completion-text {
+    font-size: 1rem;
+    font-weight: 500;
+    color: #34d399;
+    line-height: 1.4;
+  }
+
+  .btn-continue-anyways {
+    background-color: transparent;
+    color: #10b981;
+    border: 1px solid #10b981;
+    padding: 0.5rem 1.25rem;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .btn-continue-anyways:hover {
+    background-color: #10b981;
+    color: #000000;
   }
 
   .statement-wrapper {
@@ -691,75 +783,169 @@
     transform: scale(0.97);
   }
 
-  /* Stage 3: 24D Traits Section (No redundant title, no divider) */
+  /* Stage 3: Personality and Values Profile */
   .traits-stage {
     width: 100%;
-  }
-
-  .traits-columns {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 2rem;
     background-color: #0c0c0c;
     border: 1px solid #1c1c1c;
     border-radius: 8px;
-    padding: 1.75rem;
+    padding: 2rem;
+    box-sizing: border-box;
   }
 
-  .trait-group-heading {
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: #cccccc;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    margin: 0 0 0.85rem;
+  @media (max-width: 640px) {
+    .traits-stage {
+      padding: 1.25rem 1rem;
+    }
   }
 
-  .trait-rows {
+  .dimensions-split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2.75rem;
+    align-items: flex-start;
+  }
+
+  @media (max-width: 768px) {
+    .dimensions-split {
+      grid-template-columns: 1fr;
+      gap: 2.25rem;
+    }
+  }
+
+  .dimension-col {
     display: flex;
     flex-direction: column;
-    gap: 0.55rem;
+    min-width: 0;
   }
 
-  .trait-row {
+  .dimension-heading {
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: #ffffff;
+    margin: 0 0 1rem;
+  }
+
+  .big5-lead {
+    font-size: 0.95rem;
+    line-height: 1.6;
+    color: #a3a3a3;
+    margin-bottom: 1.25rem;
+  }
+
+  .big5-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+  }
+
+  .big5-item {
+    margin: 0;
+    padding: 0;
+  }
+
+  .big5-btn {
+    position: relative;
+    width: 100%;
+    display: block;
+    text-align: left;
+    font-family: inherit;
+    font-size: 0.95rem;
+    font-weight: 500;
+    background-color: #090909;
+    border: 1px solid #1f1f1f;
+    border-radius: 6px;
+    cursor: pointer;
+    overflow: hidden;
+    padding: 0;
+    margin: 0;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+    user-select: none;
+  }
+
+  .big5-btn:hover,
+  .big5-btn.active {
+    border-color: #3b82f6;
+    background-color: #111827;
+  }
+
+  .big5-bar-fill {
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    background: linear-gradient(90deg, rgba(59, 130, 246, 0.15), rgba(59, 130, 246, 0.35));
+    border-right: 2px solid #3b82f6;
+    border-radius: 5px 0 0 5px;
+    transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    pointer-events: none;
+  }
+
+  .big5-content {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.7rem 1rem;
+  }
+
+  .big5-name {
+    font-weight: 500;
+    color: #ffffff;
+  }
+
+  .big5-pct {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #93c5fd;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .big5-caption-container {
+    min-height: 4.5rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 1.25rem 0.25rem 0;
+  }
+
+  .big5-caption-header {
     display: flex;
     align-items: center;
-    gap: 0.65rem;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
+  }
+
+  .big5-caption-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #ffffff;
+  }
+
+  .big5-caption-pct {
     font-size: 0.8rem;
-  }
-
-  .t-name {
-    width: 130px;
-    color: #cccccc;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    flex-shrink: 0;
-  }
-
-  .t-track {
-    flex: 1;
-    height: 4px;
-    background-color: #1f1f1f;
-    border-radius: 2px;
-    overflow: hidden;
-  }
-
-  .t-fill {
-    height: 100%;
-    background-color: #ffffff;
-  }
-
-  .value-fill {
-    background-color: #3b82f6;
-  }
-
-  .t-val {
-    width: 38px;
-    text-align: right;
-    color: #888888;
+    font-weight: 700;
+    color: #38bdf8;
+    background: rgba(56, 189, 248, 0.12);
+    border: 1px solid rgba(56, 189, 248, 0.25);
+    padding: 0.08rem 0.45rem;
+    border-radius: 9999px;
     font-variant-numeric: tabular-nums;
-    flex-shrink: 0;
+  }
+
+  .big5-caption-desc {
+    font-size: 0.9rem;
+    color: #d0d0d0;
+    line-height: 1.5;
+  }
+
+  .big5-caption-placeholder {
+    font-size: 0.85rem;
+    color: #999999;
   }
 
   /* States */
@@ -829,6 +1015,18 @@
   }
 
   @media (max-width: 680px) {
+    .completion-box {
+      flex-direction: column;
+      align-items: stretch;
+      text-align: center;
+      padding: 1.25rem 1rem;
+      gap: 1rem;
+    }
+
+    .btn-continue-anyways {
+      width: 100%;
+    }
+
     .careers-header {
       flex-direction: column;
       align-items: stretch;

@@ -1,4 +1,10 @@
 <script lang="ts">
+  let {
+    values = undefined
+  }: {
+    values?: number[];
+  } = $props();
+
   const DESCRIPTIONS: Record<string, { title: string; italic: string }> = {
     'self-direction-thought': {
       title: 'Self-direction: thought',
@@ -94,10 +100,150 @@
     }
   };
 
+  const CATEGORY_TO_INDEX: Record<string, number> = {
+    'self-direction-thought': 0,
+    'self-direction-action': 1,
+    'stimulation': 2,
+    'hedonism': 3,
+    'achievement': 4,
+    'power-dominance': 5,
+    'power-resources': 6,
+    'face': 7,
+    'security-personal': 8,
+    'security-societal': 9,
+    'tradition': 10,
+    'conformity-rules': 11,
+    'conformity-interpersonal': 12,
+    'humility': 13,
+    'benevolence-caring': 14,
+    'benevolence-dependability': 15,
+    'universalism-concern': 16,
+    'universalism-nature': 17,
+    'universalism-tolerance': 18
+  };
+
+  const QUADRANT_CATEGORIES: Record<string, string[]> = {
+    'openness-to-change': ['self-direction-thought', 'self-direction-action', 'stimulation', 'hedonism'],
+    'self-enhancement': ['hedonism', 'achievement', 'power-dominance', 'power-resources', 'face'],
+    'conservation': ['face', 'security-personal', 'security-societal', 'tradition', 'conformity-rules', 'conformity-interpersonal', 'humility'],
+    'self-transcendence': ['humility', 'benevolence-caring', 'benevolence-dependability', 'universalism-concern', 'universalism-nature', 'universalism-tolerance']
+  };
+
+  const SLICES = [
+    // Openness to change (warm amber)
+    { id: 'self-direction-thought', quadrant: 'openness-to-change', color: '#fbbf24', x1: 0, y1: -160, x2: 51.95, y2: -151.33, sweep: 1 },
+    { id: 'self-direction-action', quadrant: 'openness-to-change', color: '#fbbf24', x1: 51.95, y1: -151.33, x2: 98.27, y2: -126.26, sweep: 1 },
+    { id: 'stimulation', quadrant: 'openness-to-change', color: '#fbbf24', x1: 98.27, y1: -126.26, x2: 133.95, y2: -87.51, sweep: 1 },
+
+    // Hedonism: sits on the boundary between Openness to change and Self-enhancement
+    // Openness to change half (warm amber)
+    { id: 'hedonism', quadrant: 'openness-to-change', color: '#fbbf24', x1: 133.95, y1: -87.51, x2: 146.52, y2: -64.27, sweep: 1 },
+    // Self-enhancement half (rose red)
+    { id: 'hedonism', quadrant: 'self-enhancement', color: '#f43f5e', x1: 146.52, y1: -64.27, x2: 155.10, y2: -39.28, sweep: 1 },
+
+    // Self-enhancement (rose red)
+    { id: 'achievement', quadrant: 'self-enhancement', color: '#f43f5e', x1: 155.10, y1: -39.28, x2: 159.45, y2: 13.21, sweep: 1 },
+    { id: 'power-dominance', quadrant: 'self-enhancement', color: '#f43f5e', x1: 159.45, y1: 13.21, x2: 146.52, y2: 64.27, sweep: 1 },
+    { id: 'power-resources', quadrant: 'self-enhancement', color: '#f43f5e', x1: 146.42, y1: 64.27, x2: 117.72, y2: 108.37, sweep: 1 },
+
+    // Face: sits on the boundary between Self-enhancement and Conservation
+    // Self-enhancement half (rose red)
+    { id: 'face', quadrant: 'self-enhancement', color: '#f43f5e', x1: 117.72, y1: 108.37, x2: 98.27, y2: 126.26, sweep: 1 },
+    // Conservation half (emerald green)
+    { id: 'face', quadrant: 'conservation', color: '#10b981', x1: 98.27, y1: 126.26, x2: 76.15, y2: 140.72, sweep: 1 },
+
+    // Conservation (emerald green)
+    { id: 'security-personal', quadrant: 'conservation', color: '#10b981', x1: 76.15, y1: 140.72, x2: 26.33, y2: 157.82, sweep: 1 },
+    { id: 'security-societal', quadrant: 'conservation', color: '#10b981', x1: 26.33, y1: 157.82, x2: -26.33, y2: 157.82, sweep: 1 },
+    { id: 'tradition', quadrant: 'conservation', color: '#10b981', x1: -76.15, y1: 140.72, x2: -26.33, y2: 157.82, sweep: 0 },
+    { id: 'conformity-rules', quadrant: 'conservation', color: '#10b981', x1: -117.72, y1: 108.37, x2: -76.15, y2: 140.72, sweep: 0 },
+    { id: 'conformity-interpersonal', quadrant: 'conservation', color: '#10b981', x1: -146.52, y1: 64.27, x2: -117.72, y2: 108.37, sweep: 0 },
+
+    // Humility: sits on the boundary between Conservation and Self-transcendence
+    // Conservation half (emerald green)
+    { id: 'humility', quadrant: 'conservation', color: '#10b981', x1: -155.10, y1: 39.28, x2: -146.52, y2: 64.27, sweep: 0 },
+    // Self-transcendence half (sky blue)
+    { id: 'humility', quadrant: 'self-transcendence', color: '#38bdf8', x1: -159.45, y1: 13.21, x2: -155.10, y2: 39.28, sweep: 0 },
+
+    // Self-transcendence (sky blue)
+    { id: 'benevolence-caring', quadrant: 'self-transcendence', color: '#38bdf8', x1: -155.10, y1: -39.28, x2: -159.45, y2: 13.21, sweep: 0 },
+    { id: 'benevolence-dependability', quadrant: 'self-transcendence', color: '#38bdf8', x1: -133.95, y1: -87.51, x2: -155.10, y2: -39.28, sweep: 0 },
+    { id: 'universalism-concern', quadrant: 'self-transcendence', color: '#38bdf8', x1: -98.27, y1: -126.26, x2: -133.95, y2: -87.51, sweep: 0 },
+    { id: 'universalism-nature', quadrant: 'self-transcendence', color: '#38bdf8', x1: -51.95, y1: -151.33, x2: -98.27, y2: -126.26, sweep: 0 },
+    { id: 'universalism-tolerance', quadrant: 'self-transcendence', color: '#38bdf8', x1: 0, y1: -160, x2: -51.95, y2: -151.33, sweep: 0 }
+  ];
+
   let activeCategory = $state<string | null>(null);
 
   function setActive(cat: string | null) {
     activeCategory = cat;
+  }
+
+  function handleClick(cat: string) {
+    activeCategory = activeCategory === cat ? null : cat;
+  }
+
+  function getCategoryColor(catId: string): string {
+    if (['self-direction-thought', 'self-direction-action', 'stimulation', 'openness-to-change'].includes(catId)) {
+      return '#fbbf24'; // Openness to change (warm amber)
+    }
+    if (['achievement', 'power-dominance', 'power-resources', 'self-enhancement'].includes(catId)) {
+      return '#f43f5e'; // Self-enhancement (rose red)
+    }
+    if (['security-personal', 'security-societal', 'tradition', 'conformity-rules', 'conformity-interpersonal', 'conservation'].includes(catId)) {
+      return '#10b981'; // Conservation (emerald green)
+    }
+    return '#38bdf8'; // Self-transcendence (sky blue)
+  }
+
+  function getBadgeStyle(cat: string): string {
+    if (cat === 'hedonism') {
+      return 'background: linear-gradient(90deg, rgba(251, 191, 36, 0.18), rgba(244, 63, 94, 0.18)); border: 1px solid rgba(244, 63, 94, 0.35); color: #fca5a5;';
+    }
+    if (cat === 'face') {
+      return 'background: linear-gradient(90deg, rgba(244, 63, 94, 0.18), rgba(16, 185, 129, 0.18)); border: 1px solid rgba(16, 185, 129, 0.35); color: #6ee7b7;';
+    }
+    if (cat === 'humility') {
+      return 'background: linear-gradient(90deg, rgba(16, 185, 129, 0.18), rgba(56, 189, 248, 0.18)); border: 1px solid rgba(56, 189, 248, 0.35); color: #7dd3fc;';
+    }
+    const color = getCategoryColor(cat);
+    return `color: ${color}; background: ${color}1f; border: 1px solid ${color}40;`;
+  }
+
+  function getWedgePath(x1: number, y1: number, x2: number, y2: number, sweep: number, catId: string): string {
+    if (!values) return '';
+    const idx = CATEGORY_TO_INDEX[catId];
+    if (idx === undefined || values[idx] === undefined) return '';
+    const rawVal = values[idx];
+    const fraction = Math.max(0.06, Math.min(1.0, rawVal * 4.0));
+    const r = (160 * fraction).toFixed(2);
+    const sx = (x1 * fraction).toFixed(2);
+    const sy = (y1 * fraction).toFixed(2);
+    const ex = (x2 * fraction).toFixed(2);
+    const ey = (y2 * fraction).toFixed(2);
+    return `M 0,0 L ${sx},${sy} A ${r} ${r} 0 0 ${sweep} ${ex},${ey} z`;
+  }
+
+  function getCategoryPct(cat: string): string | null {
+    if (!values) return null;
+    const idx = CATEGORY_TO_INDEX[cat];
+    if (idx !== undefined && values[idx] !== undefined) {
+      return (values[idx] * 100).toFixed(1);
+    }
+    const members = QUADRANT_CATEGORIES[cat];
+    if (members) {
+      let sum = 0;
+      let count = 0;
+      for (const m of members) {
+        const mIdx = CATEGORY_TO_INDEX[m];
+        if (mIdx !== undefined && values[mIdx] !== undefined) {
+          sum += values[mIdx];
+          count++;
+        }
+      }
+      return count > 0 ? ((sum / count) * 100).toFixed(1) : null;
+    }
+    return null;
   }
 </script>
 
@@ -229,6 +375,20 @@
       />
     </g>
 
+    <!-- Proportional Value Fill Bars (rendered when values prop is provided) -->
+    {#if values && values.length >= 19}
+      <g class="filled-bars">
+        {#each SLICES as s}
+          <path
+            d={getWedgePath(s.x1, s.y1, s.x2, s.y2, s.sweep, s.id)}
+            style="fill: {s.color}; stroke: {s.color};"
+            class="fill-wedge"
+            class:active-wedge={activeCategory === s.id || activeCategory === s.quadrant}
+          />
+        {/each}
+      </g>
+    {/if}
+
     <!-- Labels -->
     <g class="labels">
       <!-- Outer curved quadrant labels -->
@@ -344,8 +504,8 @@
         tabindex="0"
         aria-label="Openness to change"
         onmouseenter={() => setActive('openness-to-change')}
-        onclick={() => setActive('openness-to-change')}
-        onkeydown={(e) => e.key === 'Enter' && setActive('openness-to-change')}
+        onclick={() => handleClick('openness-to-change')}
+        onkeydown={(e) => e.key === 'Enter' && handleClick('openness-to-change')}
       />
       <path
         d="M 0,0 L 164.84,-72.31 A 180 180 0 0 1 110.56 142.05 z"
@@ -353,8 +513,8 @@
         tabindex="0"
         aria-label="Self-enhancement"
         onmouseenter={() => setActive('self-enhancement')}
-        onclick={() => setActive('self-enhancement')}
-        onkeydown={(e) => e.key === 'Enter' && setActive('self-enhancement')}
+        onclick={() => handleClick('self-enhancement')}
+        onkeydown={(e) => e.key === 'Enter' && handleClick('self-enhancement')}
       />
       <path
         d="M 0,0 L 110.56,142.05 A 180 180 0 0 1 -174.49 44.19 z"
@@ -362,8 +522,8 @@
         tabindex="0"
         aria-label="Conservation"
         onmouseenter={() => setActive('conservation')}
-        onclick={() => setActive('conservation')}
-        onkeydown={(e) => e.key === 'Enter' && setActive('conservation')}
+        onclick={() => handleClick('conservation')}
+        onkeydown={(e) => e.key === 'Enter' && handleClick('conservation')}
       />
       <path
         d="M 0,0 L -174.49,44.19 A 180 180 0 0 1 0,-180 z"
@@ -371,8 +531,8 @@
         tabindex="0"
         aria-label="Self-transcendence"
         onmouseenter={() => setActive('self-transcendence')}
-        onclick={() => setActive('self-transcendence')}
-        onkeydown={(e) => e.key === 'Enter' && setActive('self-transcendence')}
+        onclick={() => handleClick('self-transcendence')}
+        onkeydown={(e) => e.key === 'Enter' && handleClick('self-transcendence')}
       />
 
       <!-- Inner 19 values -->
@@ -382,8 +542,8 @@
         tabindex="0"
         aria-label="Self-direction: thought"
         onmouseenter={() => setActive('self-direction-thought')}
-        onclick={() => setActive('self-direction-thought')}
-        onkeydown={(e) => e.key === 'Enter' && setActive('self-direction-thought')}
+        onclick={() => handleClick('self-direction-thought')}
+        onkeydown={(e) => e.key === 'Enter' && handleClick('self-direction-thought')}
       />
       <path
         d="M 0,0 L 51.95,-151.33 A 160 160 0 0 1 98.27 -126.26 z"
@@ -391,8 +551,8 @@
         tabindex="0"
         aria-label="Self-direction: action"
         onmouseenter={() => setActive('self-direction-action')}
-        onclick={() => setActive('self-direction-action')}
-        onkeydown={(e) => e.key === 'Enter' && setActive('self-direction-action')}
+        onclick={() => handleClick('self-direction-action')}
+        onkeydown={(e) => e.key === 'Enter' && handleClick('self-direction-action')}
       />
       <path
         d="M 0,0 L 98.27,-126.26 A 160 160 0 0 1 133.95 -87.51 z"
@@ -400,8 +560,8 @@
         tabindex="0"
         aria-label="Stimulation"
         onmouseenter={() => setActive('stimulation')}
-        onclick={() => setActive('stimulation')}
-        onkeydown={(e) => e.key === 'Enter' && setActive('stimulation')}
+        onclick={() => handleClick('stimulation')}
+        onkeydown={(e) => e.key === 'Enter' && handleClick('stimulation')}
       />
       <path
         d="M 0,0 L 133.95,-87.51 A 160 160 0 0 1 155.10 -39.28 z"
@@ -409,8 +569,8 @@
         tabindex="0"
         aria-label="Hedonism"
         onmouseenter={() => setActive('hedonism')}
-        onclick={() => setActive('hedonism')}
-        onkeydown={(e) => e.key === 'Enter' && setActive('hedonism')}
+        onclick={() => handleClick('hedonism')}
+        onkeydown={(e) => e.key === 'Enter' && handleClick('hedonism')}
       />
       <path
         d="M 0,0 L 155.10,-39.28 A 160 160 0 0 1 159.45 13.21 z"
@@ -418,8 +578,8 @@
         tabindex="0"
         aria-label="Achievement"
         onmouseenter={() => setActive('achievement')}
-        onclick={() => setActive('achievement')}
-        onkeydown={(e) => e.key === 'Enter' && setActive('achievement')}
+        onclick={() => handleClick('achievement')}
+        onkeydown={(e) => e.key === 'Enter' && handleClick('achievement')}
       />
       <path
         d="M 0,0 L 159.45,13.21 A 160 160 0 0 1 146.52 64.27 z"
@@ -427,8 +587,8 @@
         tabindex="0"
         aria-label="Power: dominance"
         onmouseenter={() => setActive('power-dominance')}
-        onclick={() => setActive('power-dominance')}
-        onkeydown={(e) => e.key === 'Enter' && setActive('power-dominance')}
+        onclick={() => handleClick('power-dominance')}
+        onkeydown={(e) => e.key === 'Enter' && handleClick('power-dominance')}
       />
       <path
         d="M 0,0 L 146.42,64.27 A 160 160 0 0 1 117.72 108.37 z"
@@ -436,8 +596,8 @@
         tabindex="0"
         aria-label="Power: resources"
         onmouseenter={() => setActive('power-resources')}
-        onclick={() => setActive('power-resources')}
-        onkeydown={(e) => e.key === 'Enter' && setActive('power-resources')}
+        onclick={() => handleClick('power-resources')}
+        onkeydown={(e) => e.key === 'Enter' && handleClick('power-resources')}
       />
       <path
         d="M 0,0 L 117.72,108.37 A 160 160 0 0 1 76.15 140.72 z"
@@ -445,8 +605,8 @@
         tabindex="0"
         aria-label="Face"
         onmouseenter={() => setActive('face')}
-        onclick={() => setActive('face')}
-        onkeydown={(e) => e.key === 'Enter' && setActive('face')}
+        onclick={() => handleClick('face')}
+        onkeydown={(e) => e.key === 'Enter' && handleClick('face')}
       />
       <path
         d="M 0,0 L 76.15,140.72 A 160 160 0 0 1 26.33 157.82 z"
@@ -454,8 +614,8 @@
         tabindex="0"
         aria-label="Security: personal"
         onmouseenter={() => setActive('security-personal')}
-        onclick={() => setActive('security-personal')}
-        onkeydown={(e) => e.key === 'Enter' && setActive('security-personal')}
+        onclick={() => handleClick('security-personal')}
+        onkeydown={(e) => e.key === 'Enter' && handleClick('security-personal')}
       />
       <path
         d="M 0,0 L 26.33,157.82 A 160 160 0 0 1 -26.33 157.82 z"
@@ -463,8 +623,8 @@
         tabindex="0"
         aria-label="Security: societal"
         onmouseenter={() => setActive('security-societal')}
-        onclick={() => setActive('security-societal')}
-        onkeydown={(e) => e.key === 'Enter' && setActive('security-societal')}
+        onclick={() => handleClick('security-societal')}
+        onkeydown={(e) => e.key === 'Enter' && handleClick('security-societal')}
       />
       <path
         d="M 0,0 L -76.15,140.72 A 160 160 0 0 0 -26.33 157.82 z"
@@ -472,8 +632,8 @@
         tabindex="0"
         aria-label="Tradition"
         onmouseenter={() => setActive('tradition')}
-        onclick={() => setActive('tradition')}
-        onkeydown={(e) => e.key === 'Enter' && setActive('tradition')}
+        onclick={() => handleClick('tradition')}
+        onkeydown={(e) => e.key === 'Enter' && handleClick('tradition')}
       />
       <path
         d="M 0,0 L -117.72,108.37 A 160 160 0 0 0 -76.15 140.72 z"
@@ -481,8 +641,8 @@
         tabindex="0"
         aria-label="Conformity: rules"
         onmouseenter={() => setActive('conformity-rules')}
-        onclick={() => setActive('conformity-rules')}
-        onkeydown={(e) => e.key === 'Enter' && setActive('conformity-rules')}
+        onclick={() => handleClick('conformity-rules')}
+        onkeydown={(e) => e.key === 'Enter' && handleClick('conformity-rules')}
       />
       <path
         d="M 0,0 L -146.52,64.27 A 160 160 0 0 0 -117.72 108.37 z"
@@ -490,8 +650,8 @@
         tabindex="0"
         aria-label="Conformity: interpersonal"
         onmouseenter={() => setActive('conformity-interpersonal')}
-        onclick={() => setActive('conformity-interpersonal')}
-        onkeydown={(e) => e.key === 'Enter' && setActive('conformity-interpersonal')}
+        onclick={() => handleClick('conformity-interpersonal')}
+        onkeydown={(e) => e.key === 'Enter' && handleClick('conformity-interpersonal')}
       />
       <path
         d="M 0,0 L -159.45,13.21 A 160 160 0 0 0 -146.52 64.27 z"
@@ -499,8 +659,8 @@
         tabindex="0"
         aria-label="Humility"
         onmouseenter={() => setActive('humility')}
-        onclick={() => setActive('humility')}
-        onkeydown={(e) => e.key === 'Enter' && setActive('humility')}
+        onclick={() => handleClick('humility')}
+        onkeydown={(e) => e.key === 'Enter' && handleClick('humility')}
       />
       <path
         d="M 0,0 L -155.10,-39.28 A 160 160 0 0 0 -159.45 13.21 z"
@@ -508,8 +668,8 @@
         tabindex="0"
         aria-label="Benevolence: caring"
         onmouseenter={() => setActive('benevolence-caring')}
-        onclick={() => setActive('benevolence-caring')}
-        onkeydown={(e) => e.key === 'Enter' && setActive('benevolence-caring')}
+        onclick={() => handleClick('benevolence-caring')}
+        onkeydown={(e) => e.key === 'Enter' && handleClick('benevolence-caring')}
       />
       <path
         d="M 0,0 L -133.95,-87.51 A 160 160 0 0 0 -155.10 -39.28 z"
@@ -517,8 +677,8 @@
         tabindex="0"
         aria-label="Benevolence: dependability"
         onmouseenter={() => setActive('benevolence-dependability')}
-        onclick={() => setActive('benevolence-dependability')}
-        onkeydown={(e) => e.key === 'Enter' && setActive('benevolence-dependability')}
+        onclick={() => handleClick('benevolence-dependability')}
+        onkeydown={(e) => e.key === 'Enter' && handleClick('benevolence-dependability')}
       />
       <path
         d="M 0,0 L -98.27,-126.26 A 160 160 0 0 0 -133.95 -87.51 z"
@@ -526,8 +686,8 @@
         tabindex="0"
         aria-label="Universalism: concern"
         onmouseenter={() => setActive('universalism-concern')}
-        onclick={() => setActive('universalism-concern')}
-        onkeydown={(e) => e.key === 'Enter' && setActive('universalism-concern')}
+        onclick={() => handleClick('universalism-concern')}
+        onkeydown={(e) => e.key === 'Enter' && handleClick('universalism-concern')}
       />
       <path
         d="M 0,0 L -51.95,-151.33 A 160 160 0 0 0 -98.27 -126.26 z"
@@ -535,8 +695,8 @@
         tabindex="0"
         aria-label="Universalism: nature"
         onmouseenter={() => setActive('universalism-nature')}
-        onclick={() => setActive('universalism-nature')}
-        onkeydown={(e) => e.key === 'Enter' && setActive('universalism-nature')}
+        onclick={() => handleClick('universalism-nature')}
+        onkeydown={(e) => e.key === 'Enter' && handleClick('universalism-nature')}
       />
       <path
         d="M 0,0 L 0,-160 A 160 160 0 0 0 -51.95 -151.33 z"
@@ -544,8 +704,8 @@
         tabindex="0"
         aria-label="Universalism: tolerance"
         onmouseenter={() => setActive('universalism-tolerance')}
-        onclick={() => setActive('universalism-tolerance')}
-        onkeydown={(e) => e.key === 'Enter' && setActive('universalism-tolerance')}
+        onclick={() => handleClick('universalism-tolerance')}
+        onkeydown={(e) => e.key === 'Enter' && handleClick('universalism-tolerance')}
       />
     </g>
   </svg>
@@ -553,6 +713,17 @@
   <!-- Value Description Caption under the SVG -->
   <div class="caption-container">
     {#if activeCategory && DESCRIPTIONS[activeCategory]}
+      <div class="caption-header">
+        <span class="caption-title">{DESCRIPTIONS[activeCategory].title}</span>
+        {#if getCategoryPct(activeCategory) !== null}
+          <span
+            class="caption-pct"
+            style={getBadgeStyle(activeCategory)}
+          >
+            {getCategoryPct(activeCategory)}%
+          </span>
+        {/if}
+      </div>
       <div class="caption-desc">{DESCRIPTIONS[activeCategory].italic}</div>
     {:else}
       <div class="caption-placeholder">Hover or tap any value on the wheel to see its meaning</div>
@@ -587,6 +758,21 @@
     fill: rgba(255, 255, 255, 0.22);
   }
 
+  .filled-bars {
+    pointer-events: none;
+  }
+
+  .fill-wedge {
+    opacity: 0.65;
+    stroke-width: 0.5px;
+    transition: opacity 0.15s ease, stroke-width 0.15s ease;
+  }
+
+  .fill-wedge.active-wedge {
+    opacity: 1;
+    stroke-width: 1.5px;
+  }
+
   .quadrant-text {
     font-size: 9px;
     font-weight: 600;
@@ -614,7 +800,7 @@
 
   /* Description Box */
   .caption-container {
-    min-height: 4rem;
+    min-height: 4.5rem;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -622,6 +808,29 @@
     text-align: center;
     padding: 0.75rem 1rem 0;
     width: 100%;
+  }
+
+  .caption-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
+    flex-wrap: wrap;
+  }
+
+  .caption-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #ffffff;
+  }
+
+  .caption-pct {
+    font-size: 0.8rem;
+    font-weight: 700;
+    padding: 0.08rem 0.45rem;
+    border-radius: 9999px;
+    font-variant-numeric: tabular-nums;
   }
 
   .caption-desc {
