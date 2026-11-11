@@ -21,7 +21,8 @@ import sectorsData from './sectors.json';
 export interface QuestionRecord {
   id: number;
   text: string;
-  gradient: number[];
+  gradient: number[];    // Centered gradient for v2
+  rawGradient: number[]; // Raw OLS gradient for v1 replay
 }
 
 export interface OccupationRecord {
@@ -110,18 +111,23 @@ export const K_CHOICES: Record<number, number> = {
 
 const STORAGE_KEY = 'p2o_test_state_v1';
 
+export interface DecodedResult {
+  version: 1 | 2;
+  choices: number[];
+}
+
 /**
  * Ultra-compact 3-bit deterministic Base64URL encoding.
  * Since the test question selection is 100% deterministic given prior choices,
  * we only need to encode the 3-bit Likert choice (1..5 -> 0..4) for each step!
  *
- * Byte 0: format version (1)
+ * Byte 0: format version (1 for v1 legacy, 2 for v2 modern)
  * Byte 1: question count (N)
  * Bytes 2+: bitstream of 3-bit choices (N * 3 bits packed MSB-first)
  *
  * Size: 5 questions = 6 chars, 9 questions = 8 chars, 30 questions = 19 chars!
  */
-export function encodeResultChoices(history: AnswerHistoryItem[]): string {
+export function encodeResultChoices(history: AnswerHistoryItem[], version: 1 | 2 = 2): string {
   const count = history.length;
   if (count === 0) return '';
 
@@ -129,7 +135,7 @@ export function encodeResultChoices(history: AnswerHistoryItem[]): string {
   const payloadBytes = Math.ceil(totalBits / 8);
   const bytes = new Uint8Array(2 + payloadBytes);
 
-  bytes[0] = 1; // format version
+  bytes[0] = version; // format version (1 or 2)
   bytes[1] = Math.min(255, count);
 
   let bitOffset = 0;
@@ -156,7 +162,7 @@ export function encodeResultChoices(history: AnswerHistoryItem[]): string {
     .replace(/=+$/, '');
 }
 
-export function decodeResultChoices(encoded: string): number[] | null {
+export function decodeResultChoices(encoded: string): DecodedResult | null {
   try {
     let base64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
     while (base64.length % 4) {
@@ -168,9 +174,12 @@ export function decodeResultChoices(encoded: string): number[] | null {
       bytes[i] = binary.charCodeAt(i);
     }
 
-    if (bytes.length < 2 || bytes[0] !== 1) return null;
+    if (bytes.length < 2) return null;
+    const version = bytes[0];
+    if (version !== 1 && version !== 2) return null;
+
     const count = bytes[1];
-    if (count === 0) return [];
+    if (count === 0) return { version: version as 1 | 2, choices: [] };
 
     const expectedPayload = Math.ceil((count * 3) / 8);
     if (bytes.length < 2 + expectedPayload) return null;
@@ -189,7 +198,7 @@ export function decodeResultChoices(encoded: string): number[] | null {
       choices.push(choiceVal + 1); // convert 0..4 back to 1..5
     }
 
-    return choices;
+    return { version: version as 1 | 2, choices };
   } catch (e) {
     console.warn('Failed to decode shared choices:', e);
     return null;
@@ -203,12 +212,16 @@ export class TestEngine {
   loadingMessage = $state('Loading 1,141 neural question gradients and 2,108 canonical career distributions...');
   loadError = $state<string | null>(null);
 
+  // Engine Version (1 for legacy replay, 2 for modern active testing)
+  testVersion = $state<1 | 2>(2);
+
   // Core Data
   questions: QuestionRecord[] = [];
   occupations: OccupationRecord[] = [];
   popMean = new Float32Array(DIM);
   popStd = new Float32Array(DIM);
-  gradMax = new Float32Array(DIM);
+  gradMaxV1 = new Float32Array(DIM);
+  gradMaxV2 = new Float32Array(DIM);
   totalWorkers = 0;
 
   // Adaptive User State
@@ -277,11 +290,24 @@ export class TestEngine {
         onComplete: (rows) => { rawOccupations = rows; }
       });
 
-      this.questions = rawQuestions.map(r => ({
-        id: Number(r.id),
-        text: String(r.text),
-        gradient: Array.from(r.gradient)
-      }));
+      // Compute Mean Template Gradient across all 1,141 questions to center v2 gradients
+      const meanGrad = new Float32Array(DIM);
+      for (const r of rawQuestions) {
+        const g = r.gradient;
+        for (let d = 0; d < DIM; d++) meanGrad[d] += g[d];
+      }
+      for (let d = 0; d < DIM; d++) meanGrad[d] /= rawQuestions.length;
+
+      this.questions = rawQuestions.map(r => {
+        const rawG = Array.from(r.gradient) as number[];
+        const centG = rawG.map((val, d) => val - meanGrad[d]);
+        return {
+          id: Number(r.id),
+          text: String(r.text),
+          gradient: centG,       // Centered for v2
+          rawGradient: rawG      // Raw for v1 deterministic replay
+        };
+      });
 
       const sectorNames = sectorsData.sectors as string[];
       const sectorMap = sectorsData.mapping as Record<string, number>;
@@ -316,13 +342,16 @@ export class TestEngine {
         this.popStd[d] = Math.sqrt(ssq / nJobs);
       }
 
-      // Compute Max Gradient per Dimension for normalization
+      // Compute Max Gradient per Dimension for both v1 and v2 normalization
       for (let d = 0; d < DIM; d++) {
-        let maxG = 0;
+        let maxV1 = 0;
+        let maxV2 = 0;
         for (const q of this.questions) {
-          maxG = Math.max(maxG, Math.abs(q.gradient[d]));
+          maxV1 = Math.max(maxV1, Math.abs(q.rawGradient[d]));
+          maxV2 = Math.max(maxV2, Math.abs(q.gradient[d]));
         }
-        this.gradMax[d] = Math.max(maxG, 0.01);
+        this.gradMaxV1[d] = Math.max(maxV1, 0.01);
+        this.gradMaxV2[d] = Math.max(maxV2, 0.01);
       }
 
       // Check URL for shared result parameter `?r=`
@@ -333,14 +362,14 @@ export class TestEngine {
       }
 
       if (sharedParam) {
-        const choices = decodeResultChoices(sharedParam);
-        if (choices && choices.length > 0) {
+        const decoded = decodeResultChoices(sharedParam);
+        if (decoded && decoded.choices.length > 0) {
           this.loadingMessage = 'Calculating career matches from shared responses...';
           // Yield to let the browser repaint the calculating message
           await new Promise((resolve) => setTimeout(resolve, 20));
 
           // Reconstruct the exact psychometric test sequence deterministically
-          await this.reconstructFromChoices(choices);
+          await this.reconstructFromChoices(decoded.choices, decoded.version);
           this.isViewingSharedResult = true;
           // Note: We do NOT touch or overwrite localStorage when viewing a shared link!
           this.isLoaded = true;
@@ -364,28 +393,129 @@ export class TestEngine {
   }
 
   /**
-   * Deterministically replay test choices using maximum information gain question selection.
+   * Deterministically replay test choices using adaptive question selection.
+   * If version === 1, uses the exact legacy V1 question sequence.
+   * If version === 2, uses the modern V2 marginal variance reduction sequence.
    */
-  private async reconstructFromChoices(choices: number[]) {
+  private async reconstructFromChoices(choices: number[], version: 1 | 2) {
     this.answeredHistory = [];
     this.redoStack = [];
     this.alpha = 0.5;
-    this.recomputeState();
+    this.testVersion = version;
 
-    for (let i = 0; i < choices.length; i++) {
-      const choice = choices[i];
-      if (!this.currentQuestion) break;
-      const k = K_CHOICES[choice] ?? 0.0;
-      this.answeredHistory.push({
-        question: this.currentQuestion,
-        choice,
-        k
-      });
+    if (version === 1) {
+      // Replay using the exact deterministic V1 question selection trajectory
+      let curQ: QuestionRecord | null = this.questions[0] ?? null;
+      const v1Asked = new Set<number>();
+      let v1Vector = Array.from(this.popMean);
+      let v1Uncertainty = new Array(DIM).fill(1.0);
+
+      for (let i = 0; i < choices.length; i++) {
+        if (!curQ) break;
+        const choice = choices[i];
+        const k = K_CHOICES[choice] ?? 0.0;
+        v1Asked.add(curQ.id);
+        this.answeredHistory.push({ question: curQ, choice, k });
+
+        // V1 intermediate state update
+        const nextVector = Array.from(this.popMean);
+        const info = new Float32Array(DIM).fill(1.0);
+        for (const item of this.answeredHistory) {
+          for (let d = 0; d < DIM; d++) {
+            const normW = item.question.rawGradient[d] / this.gradMaxV1[d];
+            const shift = item.k * normW * this.popStd[d] * 1.85;
+            nextVector[d] = Math.max(0.0, Math.min(1.0, nextVector[d] + shift));
+            info[d] += 0.35 * Math.abs(normW);
+          }
+        }
+        for (let d = 0; d < DIM; d++) {
+          v1Uncertainty[d] = 1.0 / Math.sqrt(info[d]);
+        }
+        v1Vector = nextVector;
+
+        // V1 likelihoods for candidate divergence
+        const nJobs = this.occupations.length;
+        const ll = new Float32Array(nJobs);
+        let maxLL = -Infinity;
+        for (let j = 0; j < nJobs; j++) {
+          const occ = this.occupations[j];
+          let val = 0;
+          for (let d = 0; d < DIM; d++) {
+            const totalVar = occ.variance[d] + (v1Uncertainty[d] ** 2) * (this.popStd[d] ** 2);
+            const diff = v1Vector[d] - occ.mean[d];
+            val += -0.5 * ((diff * diff) / totalVar + Math.log(totalVar));
+          }
+          ll[j] = val;
+          if (val > maxLL) maxLL = val;
+        }
+
+        const scoredJobs = this.occupations.map((occ, j) => {
+          const logPrior = Math.log(occ.sampleCount / (this.totalWorkers || 1));
+          return { title: occ.title, mean: occ.mean, totalScore: ll[j] + this.alpha * logPrior };
+        });
+        scoredJobs.sort((a, b) => b.totalScore - a.totalScore);
+        const topCandidates = scoredJobs.slice(0, 30);
+
+        const candidateDivergence = new Float32Array(DIM);
+        if (topCandidates.length > 1) {
+          for (let d = 0; d < DIM; d++) {
+            let sum = 0;
+            for (const c of topCandidates) sum += c.mean[d];
+            const avg = sum / topCandidates.length;
+            let ssq = 0;
+            for (const c of topCandidates) {
+              const diff = c.mean[d] - avg;
+              ssq += diff * diff;
+            }
+            candidateDivergence[d] = Math.sqrt(ssq / topCandidates.length);
+          }
+        }
+
+        // V1 question selection
+        let bestQ: QuestionRecord | null = null;
+        let maxGain = -Infinity;
+        for (const q of this.questions) {
+          if (v1Asked.has(q.id)) continue;
+          let gain = 0;
+          for (let d = 0; d < DIM; d++) {
+            const normW = Math.abs(q.rawGradient[d]) / this.gradMaxV1[d];
+            const divergenceWeight = candidateDivergence[d] + 0.04;
+            const uncertaintyWeight = v1Uncertainty[d];
+            gain += divergenceWeight * uncertaintyWeight * normW;
+          }
+          if (gain > maxGain) {
+            maxGain = gain;
+            bestQ = q;
+          }
+        }
+        curQ = bestQ;
+
+        // Yield periodically so the spinner stays smooth during large replays
+        if (i > 0 && i % 25 === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+      }
+
+      this.currentQuestion = curQ;
+      // Recompute final state with V2 precision weighting and career matches
       this.recomputeState();
+    } else {
+      // V2 Replay
+      this.recomputeState();
+      for (let i = 0; i < choices.length; i++) {
+        const choice = choices[i];
+        if (!this.currentQuestion) break;
+        const k = K_CHOICES[choice] ?? 0.0;
+        this.answeredHistory.push({
+          question: this.currentQuestion,
+          choice,
+          k
+        });
+        this.recomputeState();
 
-      // Yield periodically so the spinner stays smooth during large replays
-      if (i > 0 && i % 25 === 0) {
-        await new Promise((resolve) => setTimeout(resolve, 0));
+        if (i > 0 && i % 25 === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
       }
     }
   }
@@ -394,6 +524,7 @@ export class TestEngine {
     this.answeredHistory = [];
     this.redoStack = [];
     this.alpha = 0.5;
+    this.testVersion = 2; // Always reset to modern v2 engine
     this.isViewingSharedResult = false;
     this.recomputeState();
     this.clearStorage();
@@ -492,7 +623,7 @@ export class TestEngine {
 
   getShareUrl(): string {
     if (typeof window === 'undefined') return '';
-    const encoded = encodeResultChoices(this.answeredHistory);
+    const encoded = encodeResultChoices(this.answeredHistory, this.testVersion);
     const origin = window.location.origin;
     const path = window.location.pathname;
     return `${origin}${path}?r=${encoded}`;
@@ -541,31 +672,43 @@ export class TestEngine {
   }
 
   private recomputeState() {
-    const nextVector = Array.from(this.popMean);
-    const nextUncertainty = new Array(DIM).fill(1.0);
     const nextAsked = new Set<number>();
-
-    const info = new Float32Array(DIM).fill(1.0);
-
     for (const item of this.answeredHistory) {
       nextAsked.add(item.question.id);
-      for (let d = 0; d < DIM; d++) {
-        const normW = item.question.gradient[d] / this.gradMax[d];
-        const shift = item.k * normW * this.popStd[d] * 1.85;
-        nextVector[d] = Math.max(0.0, Math.min(1.0, nextVector[d] + shift));
+    }
+    this.askedQuestionIds = nextAsked;
 
-        // Smooth Bayesian precision accumulation
-        info[d] += 0.35 * Math.abs(normW);
+    // V2: Principled Bayesian Precision Weighting
+    const nextVector = new Array(DIM);
+    const nextUncertainty = new Array(DIM);
+    const traitPrecision = new Float32Array(DIM).fill(1.0); // Prior precision = 1.0
+    const weightedEvidenceSum = new Float32Array(DIM);
+    for (let d = 0; d < DIM; d++) {
+      weightedEvidenceSum[d] = this.popMean[d] * 1.0;
+    }
+
+    for (const item of this.answeredHistory) {
+      for (let d = 0; d < DIM; d++) {
+        const normW = item.question.gradient[d] / this.gradMaxV2[d];
+        const weight = Math.abs(normW) * 1.75;
+        if (weight > 0.01) {
+          const evidence = Math.max(
+            0.0,
+            Math.min(1.0, this.popMean[d] + item.k * Math.sign(normW) * this.popStd[d] * 2.2)
+          );
+          weightedEvidenceSum[d] += weight * evidence;
+          traitPrecision[d] += weight;
+        }
       }
     }
 
     for (let d = 0; d < DIM; d++) {
-      nextUncertainty[d] = 1.0 / Math.sqrt(info[d]);
+      nextVector[d] = weightedEvidenceSum[d] / traitPrecision[d];
+      nextUncertainty[d] = 1.0 / Math.sqrt(traitPrecision[d]);
     }
 
     this.userVector = nextVector;
     this.userUncertainty = nextUncertainty;
-    this.askedQuestionIds = nextAsked;
 
     this.recalculateMatches();
     this.pickNextQuestion();
@@ -575,6 +718,7 @@ export class TestEngine {
     if (typeof window === 'undefined') return;
     try {
       const payload = {
+        version: this.testVersion,
         history: this.answeredHistory.map(h => ({ qId: h.question.id, choice: h.choice, k: h.k })),
         redo: this.redoStack.map(r => ({ qId: r.question.id, choice: r.choice, k: r.k })),
         alpha: this.alpha
@@ -592,7 +736,7 @@ export class TestEngine {
     } catch (e) {}
   }
 
-  private readStorage(): { history: AnswerHistoryItem[]; alpha: number } | null {
+  private readStorage(): { version: 1 | 2; history: AnswerHistoryItem[]; alpha: number } | null {
     if (typeof window === 'undefined') return null;
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -611,8 +755,9 @@ export class TestEngine {
         }
       }
 
+      const version: 1 | 2 = data.version === 1 ? 1 : 2;
       const alpha = typeof data.alpha === 'number' ? Math.max(0, Math.min(1, data.alpha)) : 0.5;
-      return { history, alpha };
+      return { version, history, alpha };
     } catch (e) {
       return null;
     }
@@ -622,6 +767,7 @@ export class TestEngine {
     const data = this.readStorage();
     if (!data) return false;
 
+    this.testVersion = data.version;
     this.answeredHistory = data.history;
     this.redoStack = [];
     this.alpha = data.alpha;
@@ -635,13 +781,24 @@ export class TestEngine {
       return;
     }
 
-    // Initial Anchor Question
+    if (this.testVersion === 1) {
+      this.pickNextQuestionV1();
+    } else {
+      this.pickNextQuestionV2();
+    }
+  }
+
+  private pickNextQuestionV1() {
+    if (this.questions.length === 0) {
+      this.currentQuestion = null;
+      return;
+    }
+
     if (this.answeredHistory.length === 0) {
       this.currentQuestion = this.questions[0];
       return;
     }
 
-    // Identify candidate divergence across top candidate jobs
     const topCandidates = this.topJobs.slice(0, 30);
     const candidateDivergence = new Float32Array(DIM);
 
@@ -668,7 +825,6 @@ export class TestEngine {
       }
     }
 
-    // Computerized Adaptive Testing: Maximize Expected Information Gain
     let bestQuestion: QuestionRecord | null = null;
     let maxGain = -Infinity;
 
@@ -677,10 +833,80 @@ export class TestEngine {
 
       let gain = 0;
       for (let d = 0; d < DIM; d++) {
-        const normW = Math.abs(q.gradient[d]) / this.gradMax[d];
+        const normW = Math.abs(q.rawGradient[d]) / this.gradMaxV1[d];
         const divergenceWeight = candidateDivergence[d] + 0.04;
         const uncertaintyWeight = this.userUncertainty[d];
         gain += divergenceWeight * uncertaintyWeight * normW;
+      }
+
+      if (gain > maxGain) {
+        maxGain = gain;
+        bestQuestion = q;
+      }
+    }
+
+    this.currentQuestion = bestQuestion;
+  }
+
+  private pickNextQuestionV2() {
+    if (this.questions.length === 0) {
+      this.currentQuestion = null;
+      return;
+    }
+
+    // Initial Anchor Question
+    if (this.answeredHistory.length === 0) {
+      this.currentQuestion = this.questions[0];
+      return;
+    }
+
+    // Identify candidate divergence across top 20 candidate occupations
+    const topCandidates = this.topJobs.slice(0, 20);
+    const candidateDivRatio = new Float32Array(DIM);
+
+    if (topCandidates.length > 1) {
+      for (let d = 0; d < DIM; d++) {
+        let sum = 0;
+        const candidateOccs: OccupationRecord[] = [];
+        for (const c of topCandidates) {
+          const occ = this.occupations.find(o => o.title === c.title);
+          if (occ) {
+            candidateOccs.push(occ);
+            sum += occ.mean[d];
+          }
+        }
+        if (candidateOccs.length > 1) {
+          const avg = sum / candidateOccs.length;
+          let ssq = 0;
+          for (const occ of candidateOccs) {
+            const diff = occ.mean[d] - avg;
+            ssq += diff * diff;
+          }
+          const candidateStd = Math.sqrt(ssq / candidateOccs.length);
+          candidateDivRatio[d] = candidateStd / (this.popStd[d] || 0.01);
+        }
+      }
+    }
+
+    let bestQuestion: QuestionRecord | null = null;
+    let maxGain = -Infinity;
+
+    for (const q of this.questions) {
+      if (this.askedQuestionIds.has(q.id)) continue;
+
+      let gain = 0;
+      for (let d = 0; d < DIM; d++) {
+        const normW = Math.abs(q.gradient[d]) / this.gradMaxV2[d];
+        const curPrec = 1.0 / (this.userUncertainty[d] ** 2);
+        // Marginal variance reduction DeltaVar = normW / (curPrec * (curPrec + normW))
+        const deltaVar = normW / (curPrec * (curPrec + normW));
+
+        // Candidate Divergence Ratio:
+        // Early questions (< 4): focus on broad coverage
+        // Later questions (>= 4): focus on career candidate divergence
+        const careerWeight = this.answeredHistory.length < 4 ? 0.3 : (candidateDivRatio[d] * 2.0);
+        const foundationalBonus = d < 5 ? 1.25 : 1.0;
+        gain += deltaVar * (1.0 + careerWeight) * foundationalBonus;
       }
 
       if (gain > maxGain) {

@@ -4,6 +4,18 @@ import { defineConfig } from 'vite';
 import fs from 'node:fs';
 import path from 'node:path';
 
+function safeRenameSync(src: string, dest: string, retries = 10) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      fs.renameSync(src, dest);
+      return;
+    } catch (err) {
+      if (i === retries - 1) throw err;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    }
+  }
+}
+
 /**
  * Adapter wrapper that preserves `build/.git` across builds.
  */
@@ -17,16 +29,20 @@ function gitPreservingAdapter(baseAdapter: any) {
 
       const hasGit = fs.existsSync(gitDir);
       if (hasGit) {
-        fs.rmSync(tempBackupDir, { recursive: true, force: true });
-        fs.cpSync(gitDir, tempBackupDir, { recursive: true });
+        if (fs.existsSync(tempBackupDir)) {
+          fs.rmSync(tempBackupDir, { recursive: true, force: true, maxRetries: 3 });
+        }
+        safeRenameSync(gitDir, tempBackupDir);
       }
 
       try {
         await baseAdapter.adapt(builder);
       } finally {
         if (hasGit && fs.existsSync(tempBackupDir)) {
-          fs.cpSync(tempBackupDir, gitDir, { recursive: true });
-          fs.rmSync(tempBackupDir, { recursive: true, force: true });
+          if (fs.existsSync(gitDir)) {
+            fs.rmSync(gitDir, { recursive: true, force: true, maxRetries: 3 });
+          }
+          safeRenameSync(tempBackupDir, gitDir);
         }
       }
     }
