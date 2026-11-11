@@ -4,14 +4,22 @@ import { defineConfig } from 'vite';
 import fs from 'node:fs';
 import path from 'node:path';
 
-function safeRenameSync(src: string, dest: string, retries = 10) {
+function safeRenameSync(src: string, dest: string, retries = 25) {
   for (let i = 0; i < retries; i++) {
     try {
       fs.renameSync(src, dest);
       return;
     } catch (err) {
-      if (i === retries - 1) throw err;
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+      if (i === retries - 1) {
+        try {
+          fs.cpSync(src, dest, { recursive: true });
+          fs.rmSync(src, { recursive: true, force: true, maxRetries: 5 });
+          return;
+        } catch (e) {
+          throw err;
+        }
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
     }
   }
 }

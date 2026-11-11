@@ -30,6 +30,8 @@ export interface OccupationRecord {
   sampleCount: number;
   mean: number[];
   variance: number[];
+  regVariance: number[]; // Bayesian shrunk variance
+  normPrior: number;     // Normalized prior bonus for market demand
   sectorIndex: number;
   sectorName: string;
 }
@@ -112,7 +114,7 @@ export const K_CHOICES: Record<number, number> = {
 const STORAGE_KEY = 'p2o_test_state_v1';
 
 export interface DecodedResult {
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   choices: number[];
 }
 
@@ -121,13 +123,13 @@ export interface DecodedResult {
  * Since the test question selection is 100% deterministic given prior choices,
  * we only need to encode the 3-bit Likert choice (1..5 -> 0..4) for each step!
  *
- * Byte 0: format version (1 for v1 legacy, 2 for v2 modern)
+ * Byte 0: format version (1 for v1 legacy, 2 for v2, 3 for modern v3 CAT)
  * Byte 1: question count (N)
  * Bytes 2+: bitstream of 3-bit choices (N * 3 bits packed MSB-first)
  *
  * Size: 5 questions = 6 chars, 9 questions = 8 chars, 30 questions = 19 chars!
  */
-export function encodeResultChoices(history: AnswerHistoryItem[], version: 1 | 2 = 2): string {
+export function encodeResultChoices(history: AnswerHistoryItem[], version: 1 | 2 | 3 = 3): string {
   const count = history.length;
   if (count === 0) return '';
 
@@ -135,7 +137,7 @@ export function encodeResultChoices(history: AnswerHistoryItem[], version: 1 | 2
   const payloadBytes = Math.ceil(totalBits / 8);
   const bytes = new Uint8Array(2 + payloadBytes);
 
-  bytes[0] = version; // format version (1 or 2)
+  bytes[0] = version; // format version (1, 2, or 3)
   bytes[1] = Math.min(255, count);
 
   let bitOffset = 0;
@@ -176,10 +178,10 @@ export function decodeResultChoices(encoded: string): DecodedResult | null {
 
     if (bytes.length < 2) return null;
     const version = bytes[0];
-    if (version !== 1 && version !== 2) return null;
+    if (version !== 1 && version !== 2 && version !== 3) return null;
 
     const count = bytes[1];
-    if (count === 0) return { version: version as 1 | 2, choices: [] };
+    if (count === 0) return { version: version as 1 | 2 | 3, choices: [] };
 
     const expectedPayload = Math.ceil((count * 3) / 8);
     if (bytes.length < 2 + expectedPayload) return null;
@@ -198,7 +200,7 @@ export function decodeResultChoices(encoded: string): DecodedResult | null {
       choices.push(choiceVal + 1); // convert 0..4 back to 1..5
     }
 
-    return { version: version as 1 | 2, choices };
+    return { version: version as 1 | 2 | 3, choices };
   } catch (e) {
     console.warn('Failed to decode shared choices:', e);
     return null;
@@ -212,14 +214,15 @@ export class TestEngine {
   loadingMessage = $state('Loading 1,141 neural question gradients and 2,108 canonical career distributions...');
   loadError = $state<string | null>(null);
 
-  // Engine Version (1 for legacy replay, 2 for modern active testing)
-  testVersion = $state<1 | 2>(2);
+  // Engine Version (1 for legacy replay, 2 for v2 replay, 3 for modern v3 active testing)
+  testVersion = $state<1 | 2 | 3>(3);
 
   // Core Data
   questions: QuestionRecord[] = [];
   occupations: OccupationRecord[] = [];
   popMean = new Float32Array(DIM);
   popStd = new Float32Array(DIM);
+  meanWithinVar = new Float32Array(DIM);
   gradMaxV1 = new Float32Array(DIM);
   gradMaxV2 = new Float32Array(DIM);
   totalWorkers = 0;
@@ -320,6 +323,8 @@ export class TestEngine {
           sampleCount: Number(r.sample_count),
           mean: Array.from(r.mean),
           variance: Array.from(r.variance),
+          regVariance: [],
+          normPrior: 0,
           sectorIndex: sIdx,
           sectorName: sectorNames[sIdx] ?? 'Other'
         };
@@ -340,6 +345,36 @@ export class TestEngine {
           ssq += diff * diff;
         }
         this.popStd[d] = Math.sqrt(ssq / nJobs);
+      }
+
+      // Compute Grand Mean of Within-Job Variances across all 2,108 occupations
+      const meanWithinVar = new Float32Array(DIM);
+      for (const occ of this.occupations) {
+        for (let d = 0; d < DIM; d++) meanWithinVar[d] += occ.variance[d];
+      }
+      for (let d = 0; d < DIM; d++) meanWithinVar[d] /= nJobs;
+      this.meanWithinVar = meanWithinVar;
+
+      // Empirical Bayes Variance Shrinkage (N0 = 25) toward grand mean of within-job variances
+      const N0 = 25;
+      let minSampleCount = Infinity;
+      let maxSampleCount = -Infinity;
+      for (const occ of this.occupations) {
+        if (occ.sampleCount < minSampleCount) minSampleCount = occ.sampleCount;
+        if (occ.sampleCount > maxSampleCount) maxSampleCount = occ.sampleCount;
+      }
+      const logMin = Math.log(Math.max(1, minSampleCount));
+      const logMax = Math.log(Math.max(2, maxSampleCount));
+      const logSpan = logMax - logMin || 1.0;
+
+      for (const occ of this.occupations) {
+        const N = occ.sampleCount;
+        const regVar = new Array(DIM);
+        for (let d = 0; d < DIM; d++) {
+          regVar[d] = (N * occ.variance[d] + N0 * this.meanWithinVar[d]) / (N + N0);
+        }
+        occ.regVariance = regVar;
+        occ.normPrior = ((Math.log(Math.max(1, N)) - logMin) / logSpan) * 12.0;
       }
 
       // Compute Max Gradient per Dimension for both v1 and v2 normalization
@@ -395,9 +430,10 @@ export class TestEngine {
   /**
    * Deterministically replay test choices using adaptive question selection.
    * If version === 1, uses the exact legacy V1 question sequence.
-   * If version === 2, uses the modern V2 marginal variance reduction sequence.
+   * If version === 2, uses the V2 marginal variance reduction sequence.
+   * If version === 3, uses the modern V3 candidate disambiguation sequence.
    */
-  private async reconstructFromChoices(choices: number[], version: 1 | 2) {
+  private async reconstructFromChoices(choices: number[], version: 1 | 2 | 3) {
     this.answeredHistory = [];
     this.redoStack = [];
     this.alpha = 0.5;
@@ -524,7 +560,7 @@ export class TestEngine {
     this.answeredHistory = [];
     this.redoStack = [];
     this.alpha = 0.5;
-    this.testVersion = 2; // Always reset to modern v2 engine
+    this.testVersion = 3; // Always reset to modern v3 engine
     this.isViewingSharedResult = false;
     this.recomputeState();
     this.clearStorage();
@@ -690,8 +726,11 @@ export class TestEngine {
     for (const item of this.answeredHistory) {
       for (let d = 0; d < DIM; d++) {
         const normW = item.question.gradient[d] / this.gradMaxV2[d];
-        const weight = Math.abs(normW) * 1.75;
-        if (weight > 0.01) {
+        const absW = Math.abs(normW);
+        // Noise floor threshold: only questions that meaningfully touch trait d provide evidence
+        if (absW > 0.10) {
+          // Quadratic weighting: primary traits (absW ~ 0.8) have ~25x the weight of secondary touches (absW ~ 0.15)
+          const weight = absW * absW * 2.5;
           const evidence = Math.max(
             0.0,
             Math.min(1.0, this.popMean[d] + item.k * Math.sign(normW) * this.popStd[d] * 2.2)
@@ -736,7 +775,7 @@ export class TestEngine {
     } catch (e) {}
   }
 
-  private readStorage(): { version: 1 | 2; history: AnswerHistoryItem[]; alpha: number } | null {
+  private readStorage(): { version: 1 | 2 | 3; history: AnswerHistoryItem[]; alpha: number } | null {
     if (typeof window === 'undefined') return null;
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -755,7 +794,7 @@ export class TestEngine {
         }
       }
 
-      const version: 1 | 2 = data.version === 1 ? 1 : 2;
+      const version: 1 | 2 | 3 = data.version === 1 ? 1 : (data.version === 2 ? 2 : 3);
       const alpha = typeof data.alpha === 'number' ? Math.max(0, Math.min(1, data.alpha)) : 0.5;
       return { version, history, alpha };
     } catch (e) {
@@ -783,8 +822,10 @@ export class TestEngine {
 
     if (this.testVersion === 1) {
       this.pickNextQuestionV1();
-    } else {
+    } else if (this.testVersion === 2) {
       this.pickNextQuestionV2();
+    } else {
+      this.pickNextQuestionV3();
     }
   }
 
@@ -799,29 +840,55 @@ export class TestEngine {
       return;
     }
 
-    const topCandidates = this.topJobs.slice(0, 30);
-    const candidateDivergence = new Float32Array(DIM);
+    // Reconstruct pure V1 state to ensure 100% deterministic CAT replay
+    const nextVector = Array.from(this.popMean);
+    const info = new Float32Array(DIM).fill(1.0);
+    for (const item of this.answeredHistory) {
+      for (let d = 0; d < DIM; d++) {
+        const normW = item.question.rawGradient[d] / this.gradMaxV1[d];
+        const shift = item.k * normW * this.popStd[d] * 1.85;
+        nextVector[d] = Math.max(0.0, Math.min(1.0, nextVector[d] + shift));
+        info[d] += 0.35 * Math.abs(normW);
+      }
+    }
+    const v1Uncertainty = new Float32Array(DIM);
+    for (let d = 0; d < DIM; d++) {
+      v1Uncertainty[d] = 1.0 / Math.sqrt(info[d]);
+    }
+    const v1Vector = nextVector;
 
+    const nJobs = this.occupations.length;
+    const ll = new Float32Array(nJobs);
+    for (let j = 0; j < nJobs; j++) {
+      const occ = this.occupations[j];
+      let val = 0;
+      for (let d = 0; d < DIM; d++) {
+        const totalVar = occ.variance[d] + (v1Uncertainty[d] ** 2) * (this.popStd[d] ** 2);
+        const diff = v1Vector[d] - occ.mean[d];
+        val += -0.5 * ((diff * diff) / totalVar + Math.log(totalVar));
+      }
+      ll[j] = val;
+    }
+
+    const scoredJobs = this.occupations.map((occ, j) => {
+      const logPrior = Math.log(occ.sampleCount / (this.totalWorkers || 1));
+      return { title: occ.title, mean: occ.mean, totalScore: ll[j] + this.alpha * logPrior };
+    });
+    scoredJobs.sort((a, b) => b.totalScore - a.totalScore);
+    const topCandidates = scoredJobs.slice(0, 30);
+
+    const candidateDivergence = new Float32Array(DIM);
     if (topCandidates.length > 1) {
       for (let d = 0; d < DIM; d++) {
         let sum = 0;
-        const candidateOccs: OccupationRecord[] = [];
+        for (const c of topCandidates) sum += c.mean[d];
+        const avg = sum / topCandidates.length;
+        let ssq = 0;
         for (const c of topCandidates) {
-          const occ = this.occupations.find(o => o.title === c.title);
-          if (occ) {
-            candidateOccs.push(occ);
-            sum += occ.mean[d];
-          }
+          const diff = c.mean[d] - avg;
+          ssq += diff * diff;
         }
-        if (candidateOccs.length > 1) {
-          const avg = sum / candidateOccs.length;
-          let ssq = 0;
-          for (const occ of candidateOccs) {
-            const diff = occ.mean[d] - avg;
-            ssq += diff * diff;
-          }
-          candidateDivergence[d] = Math.sqrt(ssq / candidateOccs.length);
-        }
+        candidateDivergence[d] = Math.sqrt(ssq / topCandidates.length);
       }
     }
 
@@ -835,7 +902,7 @@ export class TestEngine {
       for (let d = 0; d < DIM; d++) {
         const normW = Math.abs(q.rawGradient[d]) / this.gradMaxV1[d];
         const divergenceWeight = candidateDivergence[d] + 0.04;
-        const uncertaintyWeight = this.userUncertainty[d];
+        const uncertaintyWeight = v1Uncertainty[d];
         gain += divergenceWeight * uncertaintyWeight * normW;
       }
 
@@ -918,33 +985,141 @@ export class TestEngine {
     this.currentQuestion = bestQuestion;
   }
 
+  private pickNextQuestionV3() {
+    if (this.questions.length === 0) {
+      this.currentQuestion = null;
+      return;
+    }
+
+    // Initial Anchor Question
+    if (this.answeredHistory.length === 0) {
+      this.currentQuestion = this.questions[0];
+      return;
+    }
+
+    // Identify candidate divergence across top 20 candidate occupations
+    const topCandidates = this.topJobs.slice(0, 20);
+    const candidateDivRatio = new Float32Array(DIM);
+
+    if (topCandidates.length > 1) {
+      const topOccs: OccupationRecord[] = [];
+      for (const c of topCandidates) {
+        const occ = this.occupations.find(o => o.title === c.title);
+        if (occ) topOccs.push(occ);
+      }
+
+      if (topOccs.length > 1) {
+        for (let d = 0; d < DIM; d++) {
+          let sum = 0;
+          for (const occ of topOccs) sum += occ.mean[d];
+          const avg = sum / topOccs.length;
+          let ssq = 0;
+          for (const occ of topOccs) {
+            const diff = occ.mean[d] - avg;
+            ssq += diff * diff;
+          }
+          const candidateStd = Math.sqrt(ssq / topOccs.length);
+          candidateDivRatio[d] = candidateStd / (this.popStd[d] || 0.01);
+        }
+      }
+    }
+
+    let bestQuestion: QuestionRecord | null = null;
+    let maxGain = -Infinity;
+
+    for (const q of this.questions) {
+      if (this.askedQuestionIds.has(q.id)) continue;
+
+      let gain = 0;
+      for (let d = 0; d < DIM; d++) {
+        const normW = Math.abs(q.gradient[d]) / this.gradMaxV2[d];
+        // V3 Noise Floor: questions below 0.10 provide no Bayesian evidence
+        if (normW <= 0.10) continue;
+
+        // V3 Quadratic Evidence Precision: directly aligns with Bayesian updater
+        const dPrec = normW * normW * 2.5;
+        const curPrec = 1.0 / (this.userUncertainty[d] ** 2);
+        const deltaVar = dPrec / (curPrec * (curPrec + dPrec));
+
+        // Candidate Disambiguation Weight:
+        // Early questions (< 4): foundational trait anchoring
+        // Later questions (>= 4): discriminate between active candidate occupations
+        const careerWeight = this.answeredHistory.length < 4 ? 0.25 : (candidateDivRatio[d] * 2.5);
+        const foundationalBonus = d < 5 ? 1.2 : 1.0;
+        gain += deltaVar * (1.0 + careerWeight) * foundationalBonus;
+      }
+
+      if (gain > maxGain) {
+        maxGain = gain;
+        bestQuestion = q;
+      }
+    }
+
+    this.currentQuestion = bestQuestion;
+  }
+
   private recalculateMatches() {
     if (this.occupations.length === 0) return;
     const nJobs = this.occupations.length;
 
-    const logLikelihoods = new Float32Array(nJobs);
-    let maxLL = -Infinity;
+    const mahalanobisD2 = new Float32Array(nJobs);
+    const rawFitScores = new Float32Array(nJobs);
+    let minD2 = Infinity;
 
     for (let j = 0; j < nJobs; j++) {
       const occ = this.occupations[j];
-      let ll = 0;
+      let sumWeightedD2 = 0;
+      let specialistTerm = 0;
+      let totalInfo = 0;
 
       for (let d = 0; d < DIM; d++) {
-        const totalVar = occ.variance[d] + (this.userUncertainty[d] ** 2) * (this.popStd[d] ** 2);
+        // Information weight: 0 (unasked) to ~0.8 (well-probed)
+        const infoD = Math.max(0, 1.0 - (this.userUncertainty[d] ** 2));
+        totalInfo += infoD;
+
+        // Combined Double Variance: Job within-job variance + User Uncertainty variance
+        const userVar = (this.userUncertainty[d] ** 2) * this.meanWithinVar[d];
+        const combinedVar = occ.regVariance[d] + userVar;
         const diff = this.userVector[d] - occ.mean[d];
-        ll += -0.5 * ((diff * diff) / totalVar + Math.log(totalVar));
+        const dimD2 = (diff * diff) / combinedVar;
+
+        // Information-Weighted Distance: Only probed dimensions contribute!
+        sumWeightedD2 += infoD * dimD2;
+
+        // Distinctiveness weighting:
+        // A career is only a specialist on dimension d if its centroid deviates from the population mean!
+        // Neutral center-dwelling careers do not get an unearned specialist bonus for being average.
+        const distinctiveness = Math.min(1.0, Math.abs(occ.mean[d] - this.popMean[d]) / (this.popStd[d] || 0.01));
+
+        // Specialist precision ratio relative to the standard worker variance:
+        const refCombinedVar = (1.0 + (this.userUncertainty[d] ** 2)) * this.meanWithinVar[d];
+        const logRatio = Math.log(refCombinedVar / combinedVar);
+
+        // If user is inside the range (dimD2 < 1.0), tighter variance gives a reward!
+        // If user is outside (dimD2 > 1.0), tighter variance gives a penalty!
+        const rangeAdvantage = 1.0 - Math.min(2.0, dimD2);
+        specialistTerm += infoD * distinctiveness * logRatio * rangeAdvantage;
       }
 
-      logLikelihoods[j] = ll;
-      if (ll > maxLL) maxLL = ll;
+      // Root mean square Mahalanobis distance across effectively probed traits
+      const effDist = Math.sqrt(sumWeightedD2 / (totalInfo || 1));
+      mahalanobisD2[j] = effDist * effDist;
+      if (mahalanobisD2[j] < minD2) minD2 = mahalanobisD2[j];
+
+      const normBonus = totalInfo > 0 ? (specialistTerm / totalInfo) : 0;
+      // Calibrated sensitivity factor (0.35 on RMS distance per probed trait)
+      const baseFit = 100 * Math.exp(-0.35 * effDist);
+      const rawFit = baseFit * (1.0 + 0.10 * Math.max(-0.35, Math.min(0.35, normBonus)));
+      rawFitScores[j] = rawFit;
     }
 
-    // 1. Sector Probabilities (Softmax over Pure Likelihoods)
+    // 1. Sector Probabilities (Softmax over Double Mahalanobis distance)
     const sectorRawProbs = new Float32Array(8);
     let sumExp = 0;
 
     for (let j = 0; j < nJobs; j++) {
-      const p = Math.exp(logLikelihoods[j] - maxLL);
+      // Gaussian RBF kernel exp(-0.5 * (d2 - minD2))
+      const p = Math.exp(-0.5 * (mahalanobisD2[j] - minD2));
       sumExp += p;
       sectorRawProbs[this.occupations[j].sectorIndex] += p;
     }
@@ -977,18 +1152,14 @@ export class TestEngine {
     const reductionRatio = Math.max(0, 1.0 - meanVar);
     this.confidence = Math.max(0, Math.min(99, Math.round(reductionRatio * 100)));
 
-    // 2. Occupation Matches with Bayesian Prior Dial (alpha)
+    // 2. Occupation Matches with Unified Double Mahalanobis Fit & Specialist Tuning
     const scoredJobs = this.occupations.map((occ, j) => {
-      const logPrior = Math.log(occ.sampleCount / (this.totalWorkers || 1));
-      const totalScore = logLikelihoods[j] + this.alpha * logPrior;
+      const rawFit = rawFitScores[j];
+      const matchScore = Math.max(25, Math.min(99, Math.round(rawFit)));
 
-      let d2 = 0;
-      for (let d = 0; d < DIM; d++) {
-        const diff = (this.userVector[d] - occ.mean[d]) / (this.popStd[d] || 0.01);
-        d2 += diff * diff;
-      }
-      const dist = Math.sqrt(d2);
-      const matchScore = Math.max(25, Math.min(99, Math.round(100 * Math.exp(-0.038 * dist))));
+      // When alpha = 0 (Niche), totalScore = rawFit (strict 1:1 monotonic match with Fit %)
+      // When alpha > 0 (Market), hiring scale smoothly elevates high-volume careers
+      const totalScore = rawFit + this.alpha * occ.normPrior;
 
       const sectorName = SECTOR_DISPLAY_NAMES[occ.sectorName] || occ.sectorName;
 
@@ -996,13 +1167,19 @@ export class TestEngine {
         title: occ.title,
         totalScore,
         matchScore,
+        rawFit,
         sampleCount: occ.sampleCount,
         sectorName,
         sectorColor: SECTOR_COLORS[sectorName] || '#ffffff'
       };
     });
 
-    scoredJobs.sort((a, b) => b.totalScore - a.totalScore);
+    scoredJobs.sort((a, b) => {
+      if (Math.abs(b.totalScore - a.totalScore) > 1e-6) {
+        return b.totalScore - a.totalScore;
+      }
+      return b.rawFit - a.rawFit;
+    });
 
     this.topJobs = scoredJobs.map((job, idx) => ({
       rank: idx + 1,
