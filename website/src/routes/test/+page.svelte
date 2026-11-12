@@ -22,6 +22,39 @@
     'Neuroticism': 'Emotional sensitivity, anxiety, and stress reactivity.'
   };
 
+  const BIG_FIVE_THEMES: Record<string, { color: string; border: string; bg: string; fillGradient: string }> = {
+    'Openness': {
+      color: '#c084fc',
+      border: '#a855f7',
+      bg: 'rgba(168, 85, 247, 0.12)',
+      fillGradient: 'linear-gradient(90deg, rgba(168, 85, 247, 0.15), rgba(168, 85, 247, 0.35))'
+    },
+    'Conscientiousness': {
+      color: '#34d399',
+      border: '#10b981',
+      bg: 'rgba(16, 185, 129, 0.12)',
+      fillGradient: 'linear-gradient(90deg, rgba(16, 185, 129, 0.15), rgba(16, 185, 129, 0.35))'
+    },
+    'Extraversion': {
+      color: '#fbbf24',
+      border: '#f59e0b',
+      bg: 'rgba(245, 158, 11, 0.12)',
+      fillGradient: 'linear-gradient(90deg, rgba(245, 158, 11, 0.15), rgba(245, 158, 11, 0.35))'
+    },
+    'Agreeableness': {
+      color: '#fb7185',
+      border: '#f43f5e',
+      bg: 'rgba(244, 63, 94, 0.12)',
+      fillGradient: 'linear-gradient(90deg, rgba(244, 63, 94, 0.15), rgba(244, 63, 94, 0.35))'
+    },
+    'Neuroticism': {
+      color: '#38bdf8',
+      border: '#0ea5e9',
+      bg: 'rgba(14, 165, 233, 0.12)',
+      fillGradient: 'linear-gradient(90deg, rgba(14, 165, 233, 0.15), rgba(14, 165, 233, 0.35))'
+    }
+  };
+
   let activeBigFive = $state<string | null>(null);
   let hasContinuedPast30 = $state(false);
 
@@ -249,26 +282,28 @@
             <!-- Big Five column -->
             <div class="dimension-col">
               <h3 class="dimension-heading">Behavior (Big Five)</h3>
-              <p class="big5-lead">
-                The Big Five is the gold standard and top metric used in scientific psychology and behavioral research.
-              </p>
               <ul class="big5-list">
                 {#each bigFiveTraits as trait, idx}
-                  {@const pct = Math.round(engine.userVector[idx] * 100)}
+                  {@const pct = Math.round(engine.normalizedUserVector[idx] * 100)}
+                  {@const theme = BIG_FIVE_THEMES[trait]}
                   <li class="big5-item">
                     <button
                       type="button"
                       class="big5-btn"
                       class:active={activeBigFive === trait}
+                      style={activeBigFive === trait ? `border-color: ${theme.border}; background-color: ${theme.bg};` : ''}
                       onmouseenter={() => (activeBigFive = trait)}
                       onmouseleave={() => (activeBigFive = null)}
-                      onclick={() => (activeBigFive = activeBigFive === trait ? null : trait)}
+                      onclick={() => (activeBigFive = trait)}
                       aria-label="{trait}: {pct}%"
                     >
-                      <div class="big5-bar-fill" style="width: {pct}%"></div>
+                      <div
+                        class="big5-bar-fill"
+                        style="width: {pct}%; background: {theme.fillGradient}; border-right-color: {theme.border};"
+                      ></div>
                       <div class="big5-content">
                         <span class="big5-name">{trait}</span>
-                        <span class="big5-pct">{pct}%</span>
+                        <span class="big5-pct" style="color: {theme.color};">{pct}%</span>
                       </div>
                     </button>
                   </li>
@@ -277,14 +312,23 @@
               <div class="big5-caption-container">
                 {#if activeBigFive && bigFiveDescriptions[activeBigFive]}
                   {@const activeIdx = bigFiveTraits.indexOf(activeBigFive)}
-                  {@const activePct = Math.round(engine.userVector[activeIdx] * 100)}
+                  {@const activePct = Math.round(engine.normalizedUserVector[activeIdx] * 100)}
+                  {@const theme = BIG_FIVE_THEMES[activeBigFive]}
                   <div class="big5-caption-header">
                     <span class="big5-caption-title">{activeBigFive}</span>
-                    <span class="big5-caption-pct">{activePct}%</span>
+                    <span
+                      class="big5-caption-pct"
+                      style="color: {theme.color}; background: {theme.bg}; border: 1px solid {theme.border}40;"
+                    >
+                      {activePct}%
+                    </span>
                   </div>
                   <div class="big5-caption-desc">{bigFiveDescriptions[activeBigFive]}</div>
                 {:else}
-                  <div class="big5-caption-placeholder">Hover or tap any trait to see its meaning</div>
+                  <div class="big5-caption-placeholder">
+                    <span class="desktop-instruction">Hover any trait to see its meaning</span>
+                    <span class="mobile-instruction">Tap any trait to see its meaning</span>
+                  </div>
                 {/if}
               </div>
             </div>
@@ -292,7 +336,7 @@
             <!-- Schwartz circle column -->
             <div class="dimension-col">
               <h3 class="dimension-heading">Values (Schwartz)</h3>
-              <SchwartzCircle values={engine.userVector.slice(5, 24)} />
+              <SchwartzCircle values={engine.normalizedUserVector.slice(5, 24)} />
             </div>
           </div>
         </section>
@@ -826,13 +870,6 @@
     margin: 0 0 1rem;
   }
 
-  .big5-lead {
-    font-size: 0.95rem;
-    line-height: 1.6;
-    color: #a3a3a3;
-    margin-bottom: 1.25rem;
-  }
-
   .big5-list {
     list-style: none;
     padding: 0;
@@ -866,10 +903,9 @@
     user-select: none;
   }
 
-  .big5-btn:hover,
-  .big5-btn.active {
-    border-color: #3b82f6;
-    background-color: #111827;
+  .big5-btn:hover {
+    border-color: #383838;
+    background-color: #141414;
   }
 
   .big5-bar-fill {
@@ -877,8 +913,7 @@
     top: 0;
     left: 0;
     bottom: 0;
-    background: linear-gradient(90deg, rgba(59, 130, 246, 0.15), rgba(59, 130, 246, 0.35));
-    border-right: 2px solid #3b82f6;
+    border-right: 2px solid;
     border-radius: 5px 0 0 5px;
     transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
     pointer-events: none;
@@ -901,7 +936,6 @@
   .big5-pct {
     font-size: 0.85rem;
     font-weight: 700;
-    color: #93c5fd;
     font-variant-numeric: tabular-nums;
   }
 
@@ -929,9 +963,6 @@
   .big5-caption-pct {
     font-size: 0.8rem;
     font-weight: 700;
-    color: #38bdf8;
-    background: rgba(56, 189, 248, 0.12);
-    border: 1px solid rgba(56, 189, 248, 0.25);
     padding: 0.08rem 0.45rem;
     border-radius: 9999px;
     font-variant-numeric: tabular-nums;
@@ -946,6 +977,23 @@
   .big5-caption-placeholder {
     font-size: 0.85rem;
     color: #999999;
+  }
+
+  .mobile-instruction {
+    display: none;
+  }
+
+  .desktop-instruction {
+    display: inline;
+  }
+
+  @media (max-width: 768px), (hover: none) {
+    .desktop-instruction {
+      display: none;
+    }
+    .mobile-instruction {
+      display: inline;
+    }
   }
 
   /* States */

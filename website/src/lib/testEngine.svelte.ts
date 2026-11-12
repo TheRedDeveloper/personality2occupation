@@ -30,8 +30,11 @@ export interface OccupationRecord {
   sampleCount: number;
   mean: number[];
   variance: number[];
-  regVariance: number[]; // Bayesian shrunk variance
-  normPrior: number;     // Normalized prior bonus for market demand
+  regVariance: number[];   // Bayesian shrunk variance (N0 = 50 for V5 matching)
+  regVarianceV4?: number[]; // Preserved Bayesian shrunk variance (N0 = 25 for V4 replay)
+  normPrior: number;       // Normalized prior bonus for market demand
+  axis1?: number;          // Schwartz Circumplex Axis 1: Self-Transcendence vs Self-Enhancement
+  axis2?: number;          // Schwartz Circumplex Axis 2: Openness to Change vs Conservation
   sectorIndex: number;
   sectorName: string;
 }
@@ -115,8 +118,28 @@ export const K_CHOICES: Record<number, number> = {
 const STORAGE_KEY = 'p2o_test_state_v1';
 
 export interface DecodedResult {
-  version: 1 | 2 | 3 | 4;
+  version: 1 | 2 | 3 | 4 | 5;
   choices: number[];
+}
+
+/**
+ * Standard Normal Cumulative Distribution Function (CDF).
+ * Maps a z-score to its percentile (0.0 to 1.0), with z = 0 mapping to 0.50 (50%).
+ */
+export function normalCdf(z: number): number {
+  const a1 = 0.254829592;
+  const a2 = -0.284496736;
+  const a3 = 1.421413741;
+  const a4 = -1.453152027;
+  const a5 = 1.061405429;
+  const p = 0.3275911;
+
+  const sign = z < 0 ? -1 : 1;
+  const x = Math.abs(z) / Math.SQRT2;
+  const t = 1.0 / (1.0 + p * x);
+  const y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-x * x);
+
+  return 0.5 * (1.0 + sign * y);
 }
 
 /**
@@ -124,13 +147,13 @@ export interface DecodedResult {
  * Since the test question selection is 100% deterministic given prior choices,
  * we only need to encode the 3-bit Likert choice (1..5 -> 0..4) for each step!
  *
- * Byte 0: format version (1 for v1 legacy, 2 for v2, 3 for v3 CAT, 4 for modern v4 IRT)
+ * Byte 0: format version (1 for v1 legacy, 2 for v2, 3 for v3 CAT, 4 for v4 IRT, 5 for modern v5 Circumplex CAT)
  * Byte 1: question count (N)
  * Bytes 2+: bitstream of 3-bit choices (N * 3 bits packed MSB-first)
  *
  * Size: 5 questions = 6 chars, 9 questions = 8 chars, 30 questions = 19 chars!
  */
-export function encodeResultChoices(history: AnswerHistoryItem[], version: 1 | 2 | 3 | 4 = 4): string {
+export function encodeResultChoices(history: AnswerHistoryItem[], version: 1 | 2 | 3 | 4 | 5 = 5): string {
   const count = history.length;
   if (count === 0) return '';
 
@@ -138,7 +161,7 @@ export function encodeResultChoices(history: AnswerHistoryItem[], version: 1 | 2
   const payloadBytes = Math.ceil(totalBits / 8);
   const bytes = new Uint8Array(2 + payloadBytes);
 
-  bytes[0] = version; // format version (1, 2, 3, or 4)
+  bytes[0] = version; // format version (1, 2, 3, 4, or 5)
   bytes[1] = Math.min(255, count);
 
   let bitOffset = 0;
@@ -179,10 +202,10 @@ export function decodeResultChoices(encoded: string): DecodedResult | null {
 
     if (bytes.length < 2) return null;
     const version = bytes[0];
-    if (version !== 1 && version !== 2 && version !== 3 && version !== 4) return null;
+    if (version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5) return null;
 
     const count = bytes[1];
-    if (count === 0) return { version: version as 1 | 2 | 3 | 4, choices: [] };
+    if (count === 0) return { version: version as 1 | 2 | 3 | 4 | 5, choices: [] };
 
     const expectedPayload = Math.ceil((count * 3) / 8);
     if (bytes.length < 2 + expectedPayload) return null;
@@ -201,7 +224,7 @@ export function decodeResultChoices(encoded: string): DecodedResult | null {
       choices.push(choiceVal + 1); // convert 0..4 back to 1..5
     }
 
-    return { version: version as 1 | 2 | 3 | 4, choices };
+    return { version: version as 1 | 2 | 3 | 4 | 5, choices };
   } catch (e) {
     console.warn('Failed to decode shared choices:', e);
     return null;
@@ -215,8 +238,8 @@ export class TestEngine {
   loadingMessage = $state('Loading 1,141 neural question gradients and 2,108 canonical career distributions...');
   loadError = $state<string | null>(null);
 
-  // Engine Version (1 for legacy replay, 2 for v2 replay, 3 for v3 CAT, 4 for modern v4 active testing)
-  testVersion = $state<1 | 2 | 3 | 4>(4);
+  // Engine Version (1 for legacy replay, 2 for v2 replay, 3 for v3 CAT, 4 for v4 IRT, 5 for modern v5 Circumplex CAT)
+  testVersion = $state<1 | 2 | 3 | 4 | 5>(5);
 
   // Core Data
   questions: QuestionRecord[] = [];
@@ -227,6 +250,7 @@ export class TestEngine {
   gradMaxV1 = new Float32Array(DIM);
   gradMaxV2 = new Float32Array(DIM);
   totalWorkers = 0;
+  private topCandidatesV5: OccupationRecord[] = [];
 
   // Adaptive User State
   userVector = $state<number[]>(new Array(DIM).fill(0.5));
@@ -256,6 +280,14 @@ export class TestEngine {
   answeredCount = $derived(this.answeredHistory.length);
   canUndo = $derived(this.answeredHistory.length > 0 && !this.isViewingSharedResult);
   canRedo = $derived(this.redoStack.length > 0 && !this.isViewingSharedResult);
+  normalizedUserVector = $derived.by(() => {
+    const res = new Array<number>(DIM);
+    for (let d = 0; d < DIM; d++) {
+      const z = (this.userVector[d] - this.popMean[d]) / (this.popStd[d] || 0.01);
+      res[d] = Math.max(0.01, Math.min(0.99, normalCdf(z)));
+    }
+    return res;
+  });
 
   async init() {
     if (this.isLoaded || this.isLoading) return;
@@ -356,8 +388,11 @@ export class TestEngine {
       for (let d = 0; d < DIM; d++) meanWithinVar[d] /= nJobs;
       this.meanWithinVar = meanWithinVar;
 
-      // Empirical Bayes Variance Shrinkage (N0 = 25) toward grand mean of within-job variances
-      const N0 = 25;
+      // Empirical Bayes Variance Shrinkage toward grand mean of within-job variances
+      // N0_V4 = 25 preserved for deterministic V4 IRT question selection
+      // N0_V5 = 50 for V5 Domain-Normalized Z-Score Matching
+      const N0_V4 = 25;
+      const N0_V5 = 50;
       let minSampleCount = Infinity;
       let maxSampleCount = -Infinity;
       for (const occ of this.occupations) {
@@ -370,12 +405,37 @@ export class TestEngine {
 
       for (const occ of this.occupations) {
         const N = occ.sampleCount;
-        const regVar = new Array(DIM);
+        const regVarV4 = new Array(DIM);
+        const regVarV5 = new Array(DIM);
         for (let d = 0; d < DIM; d++) {
-          regVar[d] = (N * occ.variance[d] + N0 * this.meanWithinVar[d]) / (N + N0);
+          regVarV4[d] = (N * occ.variance[d] + N0_V4 * this.meanWithinVar[d]) / (N + N0_V4);
+          regVarV5[d] = (N * occ.variance[d] + N0_V5 * this.meanWithinVar[d]) / (N + N0_V5);
         }
-        occ.regVariance = regVar;
+        occ.regVariance = regVarV5;
+        occ.regVarianceV4 = regVarV4;
         occ.normPrior = ((Math.log(Math.max(1, N)) - logMin) / logSpan) * 12.0;
+
+        // Schwartz Circumplex Macro-Axes:
+        // Theoretical foundation (Schwartz 1992, 2012; SchwartzCircle):
+        // Boundary values straddle adjacent quadrants:
+        // - Humility (18): shared by Self-Transcendence (18..23) and Conservation (12..18)
+        // - Face (12): shared by Self-Enhancement (8..12) and Conservation (12..18)
+        // - Hedonism (8): shared by Openness to Change (5..8) and Self-Enhancement (8..12)
+        //
+        // Axis 1: Self-Transcendence (18..23, 6 values) minus Self-Enhancement (8..12, 5 values)
+        // Axis 2: Openness to Change (5..8, 4 values) minus Conservation (12..18, 7 values)
+        let jTrans = 0, jEnh = 0, jOpen = 0, jCons = 0;
+        for (let d = 18; d <= 23; d++) jTrans += (occ.mean[d] - this.popMean[d]) / (this.popStd[d] || 0.01);
+        jTrans /= 6;
+        for (let d = 8; d <= 12; d++) jEnh += (occ.mean[d] - this.popMean[d]) / (this.popStd[d] || 0.01);
+        jEnh /= 5;
+        occ.axis1 = jTrans - jEnh;
+
+        for (let d = 5; d <= 8; d++) jOpen += (occ.mean[d] - this.popMean[d]) / (this.popStd[d] || 0.01);
+        jOpen /= 4;
+        for (let d = 12; d <= 18; d++) jCons += (occ.mean[d] - this.popMean[d]) / (this.popStd[d] || 0.01);
+        jCons /= 7;
+        occ.axis2 = jOpen - jCons;
       }
 
       // Compute Max Gradient per Dimension for both v1 and v2 normalization
@@ -433,9 +493,10 @@ export class TestEngine {
    * If version === 1, uses the exact legacy V1 question sequence.
    * If version === 2, uses the V2 marginal variance reduction sequence.
    * If version === 3, uses the V3 candidate disambiguation sequence.
-   * If version === 4, uses the modern V4 IRT candidate sequence.
+   * If version === 4, uses the V4 IRT candidate sequence.
+   * If version === 5, uses the modern V5 Circumplex CAT candidate sequence.
    */
-  private async reconstructFromChoices(choices: number[], version: 1 | 2 | 3 | 4) {
+  private async reconstructFromChoices(choices: number[], version: 1 | 2 | 3 | 4 | 5) {
     this.answeredHistory = [];
     this.redoStack = [];
     this.alpha = 0.5;
@@ -562,7 +623,7 @@ export class TestEngine {
     this.answeredHistory = [];
     this.redoStack = [];
     this.alpha = 0.5;
-    this.testVersion = 4; // Always reset to modern v4 engine
+    this.testVersion = 5; // Always reset to modern v5 engine
     this.isViewingSharedResult = false;
     this.recomputeState();
     this.clearStorage();
@@ -774,7 +835,7 @@ export class TestEngine {
     } catch (e) {}
   }
 
-  private readStorage(): { version: 1 | 2 | 3 | 4; history: AnswerHistoryItem[]; alpha: number } | null {
+  private readStorage(): { version: 1 | 2 | 3 | 4 | 5; history: AnswerHistoryItem[]; alpha: number } | null {
     if (typeof window === 'undefined') return null;
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -793,9 +854,9 @@ export class TestEngine {
         }
       }
 
-      const version: 1 | 2 | 3 | 4 = (data.version === 1 || data.version === 2 || data.version === 3 || data.version === 4)
+      const version: 1 | 2 | 3 | 4 | 5 = (data.version === 1 || data.version === 2 || data.version === 3 || data.version === 4 || data.version === 5)
         ? data.version
-        : 4;
+        : 5;
       const alpha = typeof data.alpha === 'number' ? Math.max(0, Math.min(1, data.alpha)) : 0.5;
       return { version, history, alpha };
     } catch (e) {
@@ -827,8 +888,10 @@ export class TestEngine {
       this.pickNextQuestionV2();
     } else if (this.testVersion === 3) {
       this.pickNextQuestionV3();
-    } else {
+    } else if (this.testVersion === 4) {
       this.pickNextQuestionV4();
+    } else {
+      this.pickNextQuestionV5();
     }
   }
 
@@ -1061,6 +1124,84 @@ export class TestEngine {
     this.currentQuestion = bestQuestion;
   }
 
+  /**
+   * Dedicated candidate divergence extractor for 100% deterministic V4 test replay.
+   * Replicates the exact V4 ranking and candidate slicing logic from snapshot:
+   * uses N0 = 25 regVarianceV4, all 24 dimensions RMS distance, scoredJobs sorted
+   * by totalScore = rawFit + alpha * occ.normPrior, and extracts the top 25 by rawFit.
+   */
+  private getCandidateDivergenceV4(): Float32Array {
+    const candidateDivRatio = new Float32Array(DIM);
+    const nJobs = this.occupations.length;
+    if (nJobs === 0) return candidateDivRatio;
+
+    const scoredJobs: { occ: OccupationRecord; totalScore: number; rawFit: number }[] = new Array(nJobs);
+
+    for (let j = 0; j < nJobs; j++) {
+      const occ = this.occupations[j];
+      let sumWeightedD2 = 0;
+      let specialistTerm = 0;
+      let totalInfo = 0;
+
+      for (let d = 0; d < DIM; d++) {
+        const infoD = Math.max(0, 1.0 - (this.userUncertainty[d] ** 2));
+        totalInfo += infoD;
+
+        const regVar = occ.regVarianceV4 ? occ.regVarianceV4[d] : occ.regVariance[d];
+        const userVar = (this.userUncertainty[d] ** 2) * this.meanWithinVar[d];
+        const combinedVar = regVar + userVar;
+        const diff = this.userVector[d] - occ.mean[d];
+        const dimD2 = (diff * diff) / combinedVar;
+
+        sumWeightedD2 += infoD * dimD2;
+
+        const distinctiveness = Math.min(1.0, Math.abs(occ.mean[d] - this.popMean[d]) / (this.popStd[d] || 0.01));
+        const refCombinedVar = (1.0 + (this.userUncertainty[d] ** 2)) * this.meanWithinVar[d];
+        const logRatio = Math.log(refCombinedVar / combinedVar);
+        const rangeAdvantage = 1.0 - Math.min(2.0, dimD2);
+        specialistTerm += infoD * distinctiveness * logRatio * rangeAdvantage;
+      }
+
+      const effDist = Math.sqrt(sumWeightedD2 / (totalInfo || 1));
+      const normBonus = totalInfo > 0 ? (specialistTerm / totalInfo) : 0;
+      const baseFit = 100 * Math.exp(-0.35 * effDist);
+      const rawFit = baseFit * (1.0 + 0.10 * Math.max(-0.35, Math.min(0.35, normBonus)));
+      const totalScore = rawFit + this.alpha * occ.normPrior;
+
+      scoredJobs[j] = { occ, totalScore, rawFit };
+    }
+
+    // Sort scoredJobs exactly as snapshot line 1283 did
+    scoredJobs.sort((a, b) => {
+      if (Math.abs(b.totalScore - a.totalScore) > 1e-6) {
+        return b.totalScore - a.totalScore;
+      }
+      return b.rawFit - a.rawFit;
+    });
+
+    // In snapshot, this.topJobs was all scoredJobs.
+    // pickNextQuestionV4 sorted [...this.topJobs] by b.rawFit - a.rawFit and took top 25:
+    const rawCandidates = [...scoredJobs].sort((a, b) => b.rawFit - a.rawFit).slice(0, 25);
+
+    if (rawCandidates.length > 1) {
+      const topOccs = rawCandidates.map(c => c.occ);
+      for (let d = 0; d < DIM; d++) {
+        let sum = 0;
+        for (const occ of topOccs) sum += occ.mean[d];
+        const avg = sum / topOccs.length;
+        let ssq = 0;
+        for (const occ of topOccs) {
+          const diff = occ.mean[d] - avg;
+          ssq += diff * diff;
+        }
+        const candidateStd = Math.sqrt(ssq / topOccs.length);
+        candidateDivRatio[d] = candidateStd / (this.popStd[d] || 0.01);
+      }
+    }
+
+    return candidateDivRatio;
+  }
+
   private pickNextQuestionV4() {
     if (this.questions.length === 0) {
       this.currentQuestion = null;
@@ -1074,34 +1215,8 @@ export class TestEngine {
     }
 
     // Identify candidate divergence across top 25 candidate occupations by RAW FIT (unbiased by market sample prior)
-    // This breaks the closed confirmation loop where mega-occupations monopolize question divergence.
-    const rawCandidates = [...this.topJobs]
-      .sort((a, b) => b.rawFit - a.rawFit)
-      .slice(0, 25);
-    const candidateDivRatio = new Float32Array(DIM);
-
-    if (rawCandidates.length > 1) {
-      const topOccs: OccupationRecord[] = [];
-      for (const c of rawCandidates) {
-        const occ = this.occupations.find(o => o.title === c.title);
-        if (occ) topOccs.push(occ);
-      }
-
-      if (topOccs.length > 1) {
-        for (let d = 0; d < DIM; d++) {
-          let sum = 0;
-          for (const occ of topOccs) sum += occ.mean[d];
-          const avg = sum / topOccs.length;
-          let ssq = 0;
-          for (const occ of topOccs) {
-            const diff = occ.mean[d] - avg;
-            ssq += diff * diff;
-          }
-          const candidateStd = Math.sqrt(ssq / topOccs.length);
-          candidateDivRatio[d] = candidateStd / (this.popStd[d] || 0.01);
-        }
-      }
-    }
+    // using the exact V4 candidate extractor for 100% deterministic replay
+    const candidateDivRatio = this.getCandidateDivergenceV4();
 
     let bestQuestion: QuestionRecord | null = null;
     let maxGain = -Infinity;
@@ -1136,6 +1251,123 @@ export class TestEngine {
     this.currentQuestion = bestQuestion;
   }
 
+  /**
+   * Candidate divergence and circumplex macro-axis dispersion extractor for V5 adaptive question selection.
+   * Extracts candidate variance across all 24 psychometric traits and standard deviation across
+   * Schwartz Circumplex macro-axes (Axis 1: Self-Transcendence vs Self-Enhancement;
+   * Axis 2: Openness to Change vs Conservation) from the top 25 candidates under V5 matching.
+   */
+  private getCandidateDivergenceV5(): {
+    candidateDivRatio: Float32Array;
+    axis1Std: number;
+    axis2Std: number;
+  } {
+    const candidateDivRatio = new Float32Array(DIM);
+    let axis1Std = 0;
+    let axis2Std = 0;
+
+    const topOccs = this.topCandidatesV5;
+    if (topOccs.length > 1) {
+      for (let d = 0; d < DIM; d++) {
+        let sum = 0;
+        for (const occ of topOccs) sum += occ.mean[d];
+        const avg = sum / topOccs.length;
+        let ssq = 0;
+        for (const occ of topOccs) {
+          const diff = occ.mean[d] - avg;
+          ssq += diff * diff;
+        }
+        candidateDivRatio[d] = Math.sqrt(ssq / topOccs.length) / (this.popStd[d] || 0.01);
+      }
+
+      let a1Sum = 0;
+      let a2Sum = 0;
+      for (const occ of topOccs) {
+        a1Sum += occ.axis1 ?? 0;
+        a2Sum += occ.axis2 ?? 0;
+      }
+      const a1Avg = a1Sum / topOccs.length;
+      const a2Avg = a2Sum / topOccs.length;
+      let a1Ssq = 0;
+      let a2Ssq = 0;
+      for (const occ of topOccs) {
+        a1Ssq += ((occ.axis1 ?? 0) - a1Avg) ** 2;
+        a2Ssq += ((occ.axis2 ?? 0) - a2Avg) ** 2;
+      }
+      axis1Std = Math.sqrt(a1Ssq / topOccs.length);
+      axis2Std = Math.sqrt(a2Ssq / topOccs.length);
+    }
+
+    return { candidateDivRatio, axis1Std, axis2Std };
+  }
+
+  private pickNextQuestionV5() {
+    if (this.questions.length === 0) {
+      this.currentQuestion = null;
+      return;
+    }
+
+    // Initial Anchor Question
+    if (this.answeredHistory.length === 0) {
+      this.currentQuestion = this.questions[0];
+      return;
+    }
+
+    // Extract multidimensional divergence and circumplex dispersion across active V5 candidates
+    const { candidateDivRatio, axis1Std, axis2Std } = this.getCandidateDivergenceV5();
+
+    let bestQuestion: QuestionRecord | null = null;
+    let maxGain = -Infinity;
+
+    for (const q of this.questions) {
+      if (this.askedQuestionIds.has(q.id)) continue;
+
+      let gain = 0;
+      for (let d = 0; d < DIM; d++) {
+        const normW = Math.abs(q.gradient[d]) / this.gradMaxV2[d];
+        if (normW <= 0.10) continue;
+
+        // V5 Quadratic Evidence Precision: directly aligns with IRT information model
+        const dPrec = normW * normW * 2.5;
+        const curPrec = 1.0 / (this.userUncertainty[d] ** 2);
+        const deltaVar = dPrec / (curPrec * (curPrec + dPrec));
+
+        // Candidate Disambiguation Weight:
+        // Early questions (< 4): foundational trait anchoring
+        // Later questions (>= 4): discriminate between active candidate occupations
+        const careerWeight = this.answeredHistory.length < 4 ? 0.25 : (candidateDivRatio[d] * 2.5);
+
+        // Circumplex Macro-Axis Discrimination Bonus:
+        // If candidate occupations diverge on Axis 1 (Transcendence vs Enhancement) or Axis 2 (Openness vs Conservation),
+        // boost questions that discriminate those polar quadrants.
+        let circumplexBonus = 1.0;
+        if (axis1Std > 0.35 && ((d >= 18 && d <= 23) || (d >= 8 && d <= 12))) {
+          circumplexBonus += Math.min(0.5, axis1Std);
+        }
+        if (axis2Std > 0.35 && ((d >= 5 && d <= 8) || (d >= 12 && d <= 18))) {
+          circumplexBonus += Math.min(0.5, axis2Std);
+        }
+
+        // Foundational Big Five bonus in early stages (< 10 questions)
+        const foundationalBonus = d < 5 ? (this.answeredHistory.length < 10 ? 1.25 : 1.10) : 1.0;
+
+        // Trait Saturation Dampening:
+        // When a trait already has high certainty (uncertainty < 0.25), dampen further exploration of it
+        // so the test broadens and resolves other discriminating dimensions.
+        const uncertaintyDamp = Math.min(1.0, this.userUncertainty[d] / 0.25);
+
+        gain += deltaVar * (1.0 + careerWeight) * circumplexBonus * foundationalBonus * uncertaintyDamp;
+      }
+
+      if (gain > maxGain) {
+        maxGain = gain;
+        bestQuestion = q;
+      }
+    }
+
+    this.currentQuestion = bestQuestion;
+  }
+
   private recalculateMatches() {
     if (this.occupations.length === 0) return;
     const nJobs = this.occupations.length;
@@ -1144,49 +1376,107 @@ export class TestEngine {
     const rawFitScores = new Float32Array(nJobs);
     let minD2 = Infinity;
 
+    // User Schwartz Circumplex Macro-Axes:
+    // Theoretical foundation (Schwartz 1992, 2012; SchwartzCircle):
+    // Boundary values straddle adjacent quadrants:
+    // - Humility (18): shared by Self-Transcendence (18..23) and Conservation (12..18)
+    // - Face (12): shared by Self-Enhancement (8..12) and Conservation (12..18)
+    // - Hedonism (8): shared by Openness to Change (5..8) and Self-Enhancement (8..12)
+    //
+    // Axis 1: Self-Transcendence (18..23, 6 values) minus Self-Enhancement (8..12, 5 values)
+    // Axis 2: Openness to Change (5..8, 4 values) minus Conservation (12..18, 7 values)
+    let uTrans = 0, uEnh = 0, uOpen = 0, uCons = 0;
+    for (let d = 18; d <= 23; d++) uTrans += (this.userVector[d] - this.popMean[d]) / (this.popStd[d] || 0.01);
+    uTrans /= 6;
+    for (let d = 8; d <= 12; d++) uEnh += (this.userVector[d] - this.popMean[d]) / (this.popStd[d] || 0.01);
+    uEnh /= 5;
+    const userAxis1 = uTrans - uEnh;
+
+    for (let d = 5; d <= 8; d++) uOpen += (this.userVector[d] - this.popMean[d]) / (this.popStd[d] || 0.01);
+    uOpen /= 4;
+    for (let d = 12; d <= 18; d++) uCons += (this.userVector[d] - this.popMean[d]) / (this.popStd[d] || 0.01);
+    uCons /= 7;
+    const userAxis2 = uOpen - uCons;
+
     for (let j = 0; j < nJobs; j++) {
       const occ = this.occupations[j];
-      let sumWeightedD2 = 0;
+      let sumD4 = 0;
       let specialistTerm = 0;
       let totalInfo = 0;
+      let excessB5 = 0;
+      let excessVal = 0;
 
       for (let d = 0; d < DIM; d++) {
-        // Information weight: 0 (unasked) to ~0.8 (well-probed)
         const infoD = Math.max(0, 1.0 - (this.userUncertainty[d] ** 2));
         totalInfo += infoD;
 
-        // Combined Double Variance: Job within-job variance + User Uncertainty variance
-        const userVar = (this.userUncertainty[d] ** 2) * this.meanWithinVar[d];
-        const combinedVar = occ.regVariance[d] + userVar;
-        const diff = this.userVector[d] - occ.mean[d];
-        const dimD2 = (diff * diff) / combinedVar;
+        // Centroid Normalization: distance is evaluated in occupational centroid space (between-job standard deviation)
+        const zCentroid = (this.userVector[d] - occ.mean[d]) / (this.popStd[d] || 0.01);
+        const careerTolerance = occ.regVariance[d] / (this.meanWithinVar[d] || 0.01);
+        const effVar = careerTolerance + (this.userUncertainty[d] ** 2);
+        const dimD2 = (zCentroid * zCentroid) / effVar;
 
-        // Information-Weighted Distance: Only probed dimensions contribute!
-        sumWeightedD2 += infoD * dimD2;
+        // Big Five operational boundary hurdle:
+        // Working condition mismatches beyond 1.40 sigma (e.g. extreme extraversion/neuroticism clash)
+        // register as an operational barrier
+        if (d < 5 && infoD > 0.25) {
+          const absZ = Math.abs(zCentroid);
+          if (absZ > 1.40) {
+            const exc = absZ - 1.40;
+            excessB5 += exc * exc;
+          }
+        }
 
-        // Distinctiveness weighting:
-        // A career is only a specialist on dimension d if its centroid deviates from the population mean!
-        // Neutral center-dwelling careers do not get an unearned specialist bonus for being average.
+        // Schwartz Extreme Values boundary hurdle:
+        // Acute single-trait clashes beyond 1.75 sigma (e.g. ruthless Power or hyper-Achievement for a humble user)
+        // act as an ethical/motivational barrier without penalizing harmless vocabulary variance around 1.50 sigma
+        if (d >= 5 && infoD > 0.25) {
+          const absZ = Math.abs(zCentroid);
+          if (absZ > 1.75) {
+            const exc = absZ - 1.75;
+            excessVal += exc * exc;
+          }
+        }
+
+        // Symmetric L4 Metric: 4th power of occupational distance prevents single-trait extreme clashes
+        // from being diluted away by neutral traits
+        sumD4 += infoD * (dimD2 * dimD2);
+
         const distinctiveness = Math.min(1.0, Math.abs(occ.mean[d] - this.popMean[d]) / (this.popStd[d] || 0.01));
-
-        // Specialist precision ratio relative to the standard worker variance:
-        const refCombinedVar = (1.0 + (this.userUncertainty[d] ** 2)) * this.meanWithinVar[d];
-        const logRatio = Math.log(refCombinedVar / combinedVar);
-
-        // If user is inside the range (dimD2 < 1.0), tighter variance gives a reward!
-        // If user is outside (dimD2 > 1.0), tighter variance gives a penalty!
-        const rangeAdvantage = 1.0 - Math.min(2.0, dimD2);
-        specialistTerm += infoD * distinctiveness * logRatio * rangeAdvantage;
+        const refVar = 1.0 + (this.userUncertainty[d] ** 2);
+        const logRatio = Math.log(refVar / effVar);
+        const rangeAdv = 1.0 - Math.min(2.0, dimD2);
+        specialistTerm += infoD * distinctiveness * logRatio * rangeAdv;
       }
 
-      // Root mean square Mahalanobis distance across effectively probed traits
-      const effDist = Math.sqrt(sumWeightedD2 / (totalInfo || 1));
-      mahalanobisD2[j] = effDist * effDist;
+      // Root of order 4 (L4 norm) across effectively probed traits
+      const effDist = Math.pow(sumD4 / (totalInfo || 1), 0.25);
+
+      // Schwartz Circumplex Macro-Axis Hurdle:
+      // Protects against polar value opposition (e.g. Humanitarian care vs Power dominance/conquest)
+      let excessCircumplex = 0;
+      const axis1Diff = Math.abs(userAxis1 - (occ.axis1 ?? 0));
+      const axis2Diff = Math.abs(userAxis2 - (occ.axis2 ?? 0));
+      const THRESHOLD = 0.85;
+      if (axis1Diff > THRESHOLD) {
+        excessCircumplex += (axis1Diff - THRESHOLD) ** 2;
+      }
+      if (axis2Diff > THRESHOLD) {
+        excessCircumplex += (axis2Diff - THRESHOLD) ** 2;
+      }
+      
+      // Multi-tier Operational Boundary Hurdle:
+      // Working conditions (Big Five) + Macro value orientation (Circumplex) + Acute single-trait clash (Values)
+      const penalizedDist = effDist 
+        + 0.60 * Math.sqrt(excessB5) 
+        + 0.50 * Math.sqrt(excessCircumplex)
+        + 0.40 * Math.sqrt(excessVal);
+      mahalanobisD2[j] = penalizedDist * penalizedDist;
       if (mahalanobisD2[j] < minD2) minD2 = mahalanobisD2[j];
 
       const normBonus = totalInfo > 0 ? (specialistTerm / totalInfo) : 0;
-      // Calibrated sensitivity factor (0.35 on RMS distance per probed trait)
-      const baseFit = 100 * Math.exp(-0.35 * effDist);
+      // Calibrated sensitivity factor in centroid-normalized space
+      const baseFit = 100 * Math.exp(-0.35 * penalizedDist);
       const rawFit = baseFit * (1.0 + 0.10 * Math.max(-0.35, Math.min(0.35, normBonus)));
       rawFitScores[j] = rawFit;
     }
@@ -1242,6 +1532,7 @@ export class TestEngine {
       const sectorName = SECTOR_DISPLAY_NAMES[occ.sectorName] || occ.sectorName;
 
       return {
+        occ,
         title: occ.title,
         totalScore,
         matchScore,
@@ -1251,6 +1542,9 @@ export class TestEngine {
         sectorColor: SECTOR_COLORS[sectorName] || '#ffffff'
       };
     });
+
+    // Extract top 25 candidates by rawFit (unbiased by market sample prior) for V5 adaptive discrimination
+    this.topCandidatesV5 = [...scoredJobs].sort((a, b) => b.rawFit - a.rawFit).slice(0, 25).map(s => s.occ);
 
     scoredJobs.sort((a, b) => {
       if (Math.abs(b.totalScore - a.totalScore) > 1e-6) {

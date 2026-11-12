@@ -249,9 +249,6 @@
       <!-- Big Five column -->
       <div class="dimension-col">
         <h3>Behavior (Big Five)</h3>
-        <p class="big5-lead">
-          The Big Five is the gold standard and top metric used in scientific psychology and behavioral research.
-        </p>
         <ul class="big5-list">
           {#each bigFiveTraits as trait}
             <li
@@ -268,7 +265,10 @@
           {#if activeBigFive && bigFiveDescriptions[activeBigFive]}
             <div class="big5-caption-desc">{bigFiveDescriptions[activeBigFive]}</div>
           {:else}
-            <div class="big5-caption-placeholder">Hover or tap any trait to see its meaning</div>
+            <div class="big5-caption-placeholder">
+              <span class="desktop-instruction">Hover any trait to see its meaning</span>
+              <span class="mobile-instruction">Tap any trait to see its meaning</span>
+            </div>
           {/if}
         </div>
       </div>
@@ -653,13 +653,6 @@
     margin: 0 0 1rem;
   }
 
-  .big5-lead {
-    font-size: 0.95rem;
-    line-height: 1.6;
-    color: #a3a3a3;
-    margin-bottom: 1.25rem;
-  }
-
   .big5-list {
     list-style: none;
     padding: 0;
@@ -714,6 +707,23 @@
   .big5-caption-placeholder {
     font-size: 0.85rem;
     color: #999999;
+  }
+
+  .mobile-instruction {
+    display: none;
+  }
+
+  .desktop-instruction {
+    display: inline;
+  }
+
+  @media (max-width: 768px), (hover: none) {
+    .desktop-instruction {
+      display: none;
+    }
+    .mobile-instruction {
+      display: inline;
+    }
   }
 
   /* Quote */

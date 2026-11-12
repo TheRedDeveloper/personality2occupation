@@ -180,7 +180,7 @@
   }
 
   function handleClick(cat: string) {
-    activeCategory = activeCategory === cat ? null : cat;
+    activeCategory = cat;
   }
 
   function getCategoryColor(catId: string): string {
@@ -198,13 +198,13 @@
 
   function getBadgeStyle(cat: string): string {
     if (cat === 'hedonism') {
-      return 'background: linear-gradient(90deg, rgba(251, 191, 36, 0.18), rgba(244, 63, 94, 0.18)); border: 1px solid rgba(244, 63, 94, 0.35); color: #fca5a5;';
+      return 'background: linear-gradient(90deg, rgba(251, 191, 36, 0.22), rgba(244, 63, 94, 0.22)) padding-box, linear-gradient(90deg, rgba(251, 191, 36, 0.6), rgba(244, 63, 94, 0.6)) border-box; border: 1px solid transparent; color: #ffffff;';
     }
     if (cat === 'face') {
-      return 'background: linear-gradient(90deg, rgba(244, 63, 94, 0.18), rgba(16, 185, 129, 0.18)); border: 1px solid rgba(16, 185, 129, 0.35); color: #6ee7b7;';
+      return 'background: linear-gradient(90deg, rgba(244, 63, 94, 0.22), rgba(16, 185, 129, 0.22)) padding-box, linear-gradient(90deg, rgba(244, 63, 94, 0.6), rgba(16, 185, 129, 0.6)) border-box; border: 1px solid transparent; color: #ffffff;';
     }
     if (cat === 'humility') {
-      return 'background: linear-gradient(90deg, rgba(16, 185, 129, 0.18), rgba(56, 189, 248, 0.18)); border: 1px solid rgba(56, 189, 248, 0.35); color: #7dd3fc;';
+      return 'background: linear-gradient(90deg, rgba(16, 185, 129, 0.22), rgba(56, 189, 248, 0.22)) padding-box, linear-gradient(90deg, rgba(16, 185, 129, 0.6), rgba(56, 189, 248, 0.6)) border-box; border: 1px solid transparent; color: #ffffff;';
     }
     const color = getCategoryColor(cat);
     return `color: ${color}; background: ${color}1f; border: 1px solid ${color}40;`;
@@ -214,8 +214,8 @@
     if (!values) return '';
     const idx = CATEGORY_TO_INDEX[catId];
     if (idx === undefined || values[idx] === undefined) return '';
-    const rawVal = values[idx];
-    const fraction = Math.max(0.06, Math.min(1.0, rawVal * 4.0));
+    const normVal = values[idx];
+    const fraction = Math.max(0.06, Math.min(1.0, normVal));
     const r = (160 * fraction).toFixed(2);
     const sx = (x1 * fraction).toFixed(2);
     const sy = (y1 * fraction).toFixed(2);
@@ -224,11 +224,11 @@
     return `M 0,0 L ${sx},${sy} A ${r} ${r} 0 0 ${sweep} ${ex},${ey} z`;
   }
 
-  function getCategoryPct(cat: string): string | null {
+  function getCategoryPct(cat: string): number | null {
     if (!values) return null;
     const idx = CATEGORY_TO_INDEX[cat];
     if (idx !== undefined && values[idx] !== undefined) {
-      return (values[idx] * 100).toFixed(1);
+      return Math.round(values[idx] * 100);
     }
     const members = QUADRANT_CATEGORIES[cat];
     if (members) {
@@ -241,7 +241,7 @@
           count++;
         }
       }
-      return count > 0 ? ((sum / count) * 100).toFixed(1) : null;
+      return count > 0 ? Math.round((sum / count) * 100) : null;
     }
     return null;
   }
@@ -726,7 +726,10 @@
       </div>
       <div class="caption-desc">{DESCRIPTIONS[activeCategory].italic}</div>
     {:else}
-      <div class="caption-placeholder">Hover or tap any value on the wheel to see its meaning</div>
+      <div class="caption-placeholder">
+        <span class="desktop-instruction">Hover any value to see its meaning</span>
+        <span class="mobile-instruction">Tap any value to see its meaning</span>
+      </div>
     {/if}
   </div>
 </div>
@@ -755,7 +758,7 @@
   }
 
   .backlights path.highlighted {
-    fill: rgba(255, 255, 255, 0.22);
+    fill: rgba(255, 255, 255, 0.12);
   }
 
   .filled-bars {
@@ -763,14 +766,14 @@
   }
 
   .fill-wedge {
-    opacity: 0.65;
-    stroke-width: 0.5px;
-    transition: opacity 0.15s ease, stroke-width 0.15s ease;
+    opacity: 0.7;
+    stroke: none;
+    transition: opacity 0.15s ease;
   }
 
   .fill-wedge.active-wedge {
     opacity: 1;
-    stroke-width: 1.5px;
+    stroke: none;
   }
 
   .quadrant-text {
@@ -842,5 +845,22 @@
   .caption-placeholder {
     font-size: 0.85rem;
     color: #999999;
+  }
+
+  .mobile-instruction {
+    display: none;
+  }
+
+  .desktop-instruction {
+    display: inline;
+  }
+
+  @media (max-width: 768px), (hover: none) {
+    .desktop-instruction {
+      display: none;
+    }
+    .mobile-instruction {
+      display: inline;
+    }
   }
 </style>
