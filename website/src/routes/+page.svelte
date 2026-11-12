@@ -40,6 +40,11 @@
         'Popular tests like MBTI or 16Personalities force people into rigid, arbitrary 4-letter personality boxes that academic psychologists have widely criticized for low reliability. In contrast, this project is grounded in the peer-reviewed Big Five personality framework and Shalom Schwartz\'s Theory of Basic Human Values. Rather than assigning you an imaginary archetype, we measure you across 24 continuous dimensions and mathematically compare your profile against empirical data from 111,472 working professionals across 2,108 real-world careers. And each of our >1,000 questions is judged across those dimensions using those same measurements based on Machine Learning.'
     },
     {
+      question: 'How accurate is this test?',
+      answer:
+        'Accuracy is fundamental to our mission. We continuously refine and advance our sophisticated matching algorithm based on feedback from test-takers. At the same time, satisfying every unique perspective across 2,108 occupations is an intricate statistical challenge. We hold ourselves to a principle of universal fairness: we never attempt to tune recommendations for one specific profile by compromising or distorting the accurate matches of others. If you feel your recommended careers do not reflect the personality traits and values visualized in your profile below the test, you are welcome to open an issue on GitHub and we will investigate how our algorithm can be improved, this is an open source project after all.'
+    },
+    {
       question: 'What are the 8 sectors?',
       answer:
         'During your first few answers, the test reveals your probability alignment across 8 broad macroeconomic labor sectors before zeroing in on specific occupations.',
