@@ -143,7 +143,7 @@
     name="description"
     content="Take the free empirical career orientation test matching your Big Five traits and Schwartz values to 2,108 canonical occupations based on deep neural profiles."
   />
-  <link rel="canonical" href="https://thereddeveloper.github.io/personality2occupation/test/" />
+  <link rel="canonical" href="https://p2o.cc.cd/test/" />
 </svelte:head>
 
 <div class="test-page">

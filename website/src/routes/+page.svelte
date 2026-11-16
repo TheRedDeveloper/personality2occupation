@@ -89,7 +89,7 @@
       'alternateName': 'p2o',
       'applicationCategory': 'EducationalApplication',
       'operatingSystem': 'All',
-      'url': 'https://thereddeveloper.github.io/personality2occupation/',
+      'url': 'https://p2o.cc.cd/',
       'description':
         'Free, open-source career orientation tool matching behavioral traits and core values to 2,108 occupations based on empirical data from 111,472 working professionals.',
       'offers': {
@@ -111,7 +111,7 @@
       'alternateName': 'p2o Dataset',
       'description':
         'Empirical psychometric dataset clustering 111,472 author profiles across 24 continuous personality dimensions (Big Five behavior + 19 Schwartz values) into 2,108 canonical occupations with means and sample variances.',
-      'url': 'https://thereddeveloper.github.io/personality2occupation/',
+      'url': 'https://p2o.cc.cd/',
       'keywords': [
         'career personality test',
         'free career test',
@@ -131,12 +131,12 @@
         {
           '@type': 'DataDownload',
           'encodingFormat': 'application/vnd.apache.parquet',
-          'contentUrl': 'https://thereddeveloper.github.io/personality2occupation/data.parquet'
+          'contentUrl': 'https://p2o.cc.cd/data.parquet'
         },
         {
           '@type': 'DataDownload',
           'encodingFormat': 'application/vnd.apache.parquet',
-          'contentUrl': 'https://thereddeveloper.github.io/personality2occupation/occupations_personality.parquet'
+          'contentUrl': 'https://p2o.cc.cd/occupations_personality.parquet'
         }
       ]
     },
@@ -167,29 +167,29 @@
     name="description"
     content="Free, open-source career orientation tool matching personality traits and values to 2,108 occupations based on empirical data from 111,472 professionals."
   />
-  <link rel="canonical" href="https://thereddeveloper.github.io/personality2occupation/" />
+  <link rel="canonical" href="https://p2o.cc.cd/" />
 
   <!-- Open Graph / Facebook -->
   <meta property="og:type" content="website" />
-  <meta property="og:url" content="https://thereddeveloper.github.io/personality2occupation/" />
+  <meta property="og:url" content="https://p2o.cc.cd/" />
   <meta property="og:title" content="personality2occupation (p2o) | Free Career Personality Test" />
   <meta
     property="og:description"
     content="Free, open-source career orientation tool matching personality traits and values to 2,108 occupations based on empirical data from 111,472 professionals."
   />
-  <meta property="og:image" content="https://thereddeveloper.github.io/personality2occupation/og-image.png" />
+  <meta property="og:image" content="https://p2o.cc.cd/og-image.png" />
   <meta property="og:site_name" content="personality2occupation" />
   <meta property="og:locale" content="en_US" />
 
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:url" content="https://thereddeveloper.github.io/personality2occupation/" />
+  <meta name="twitter:url" content="https://p2o.cc.cd/" />
   <meta name="twitter:title" content="personality2occupation (p2o) | Free Career Personality Test" />
   <meta
     name="twitter:description"
     content="Free, open-source career orientation tool matching personality traits and values to 2,108 occupations based on empirical data from 111,472 professionals."
   />
-  <meta name="twitter:image" content="https://thereddeveloper.github.io/personality2occupation/og-image.png" />
+  <meta name="twitter:image" content="https://p2o.cc.cd/og-image.png" />
 
   <!-- Structured Data (JSON-LD) -->
   {@html `<script type="application/ld+json">${JSON.stringify(structuredData)}</script>`}

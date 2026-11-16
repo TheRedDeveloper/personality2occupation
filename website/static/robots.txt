@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://thereddeveloper.github.io/personality2occupation/sitemap.xml
+Sitemap: https://p2o.cc.cd/sitemap.xml
